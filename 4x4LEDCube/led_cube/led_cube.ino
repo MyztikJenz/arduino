@@ -1,51 +1,120 @@
+const int buttonPin = 7;
+
 const int clockPin = 8;
 const int latchPin = 9;
 const int outputPin = 11;
 
 const int debugLevel = 0;
 
+#define NUM_LEDS    4
+
+int effectTimer = 0;
+
 // Remember to wire the lowest layer to layer1, which is the first of the four bits
 // on the shift register
-const uint8_t layer1 = (1 << 0);
-const uint8_t layer2 = (1 << 1);
-const uint8_t layer3 = (1 << 2);
-const uint8_t layer4 = (1 << 3);
+//const uint8_t layer1 = (1 << 0);
+//const uint8_t layer2 = (1 << 1);
+//const uint8_t layer3 = (1 << 2);
+//const uint8_t layer4 = (1 << 3);
 
 uint8_t cube[4][4];
 
 void setup() {
     Serial.begin(9600);
 
+    pinMode(buttonPin, INPUT_PULLUP);
     pinMode(latchPin, OUTPUT);
     pinMode(outputPin, OUTPUT);
     pinMode(clockPin, OUTPUT);
 
-    uint8_t layer = B00001110; // Only the first four bits matter
-    uint16_t values = (B10000000 << 8) + (B11110000); 
-
-    shiftOut(outputPin, clockPin, MSBFIRST, layer1);
-    shiftOut(outputPin, clockPin, MSBFIRST, (values >> 8));
-    shiftOut(outputPin, clockPin, MSBFIRST, values);
-
-    digitalWrite(latchPin, LOW);    
-    digitalWrite(latchPin, HIGH);
-    digitalWrite(latchPin, LOW);
-
-    Serial.println("done");
+//    uint8_t layer = B00001110; // Only the first four bits matter
+//    uint16_t values = (B10000000 << 8) + (B11110000); 
+//
+//    shiftOut(outputPin, clockPin, MSBFIRST, layer1);
+//    shiftOut(outputPin, clockPin, MSBFIRST, (values >> 8));
+//    shiftOut(outputPin, clockPin, MSBFIRST, values);
+//
+//    digitalWrite(latchPin, LOW);    
+//    digitalWrite(latchPin, HIGH);
+//    digitalWrite(latchPin, LOW);
+//
+//    Serial.println("done");
+    effectTimer = 0;
 
     clearCube();
-    setVoxel(0, 0, 0);
-    setVoxel(1, 0, 0);
-    setVoxel(0, 0, 1);
+//    setVoxel(0, 0, 0);
+//    setVoxel(1, 0, 0);
+//    setVoxel(0, 0, 1);
 //    renderCube();
     printCube();
 }
 
-void loop() {
-//    testPattern();
+#define PATTERN_boxThrob    0
+#define PATTERN_layerCycle  1
+#define PATTERN_test        2
+#define MAX_PATTERNS        2
 
-//    setVoxel(0, 0, 0);
+uint8_t currentEffect = PATTERN_boxThrob;
+
+int lastButtonPressed = HIGH;
+void loop() {
+    int currentButton = digitalRead(buttonPin);
+    if (currentButton != lastButtonPressed) {
+        if (currentButton == LOW) {
+            currentEffect = (currentEffect + 1) % MAX_PATTERNS;
+            Serial.println(currentEffect);
+        }
+        lastButtonPressed = currentButton;
+    }
+
+    switch(currentEffect) {
+        case PATTERN_boxThrob: throbCube(); break;
+        case PATTERN_layerCycle: cycleLightLayers(); break;
+//        case PATTERN_test: testPattern(); break;
+
+        default: throbCube();
+        
+    }
+    
     renderCube();
+}
+
+uint8_t currentLayer = 0;
+bool layersAreHorizontal = true;
+bool layerDirectionForward = true;
+void cycleLightLayers() {
+    effectTimer++;
+    if (effectTimer > 100) {
+        effectTimer = 0;
+        lightLayer(layerDirectionForward ? currentLayer++ : currentLayer--, layersAreHorizontal);
+        if (currentLayer >= NUM_LEDS && layerDirectionForward) {
+            currentLayer = NUM_LEDS-2;
+            layerDirectionForward = !layerDirectionForward;
+        }
+        else if (currentLayer == 255 && !layerDirectionForward) {
+            currentLayer = 0;
+            layerDirectionForward = !layerDirectionForward;
+            layersAreHorizontal = !layersAreHorizontal;
+        }
+    }
+    
+}
+
+void lightLayer(uint8_t tgtLayer, bool horizontal) {
+    clearCube();
+    if (horizontal == true) {
+        for (uint8_t row=0; row<NUM_LEDS; row++) {
+            cube[tgtLayer][row] = 0xF;
+        }
+    }
+    else {
+        // for vertical layers, layer 1 is leftmost
+        for (uint8_t layer=0; layer<NUM_LEDS; layer++) {
+            for (uint8_t row=0; row<NUM_LEDS; row++) {
+                setVoxel(tgtLayer, layer, row);
+            }
+        }
+    }
 }
 
 // Our cube has (0,0,0) in the front, lower left. This is because the wiring has the LSB at that point.
@@ -56,6 +125,52 @@ void loop() {
 // Rows are perpendicular to the front, and move positively towards the back
 void setVoxel(uint8_t x, uint8_t y, uint8_t z) {
     cube[y][z] |= (1 << x);
+}
+
+uint8_t cubeSize = 1;
+bool cubeExpanding = true;
+void throbCube() {
+    effectTimer++;
+    if (effectTimer > 200) {
+        effectTimer = 0;
+        if (cubeExpanding) {
+            cubeSize++;
+        }
+        else {
+            cubeSize--;
+        }
+        clearCube();
+        drawCube(0, 0, 0, cubeSize);
+
+        if (cubeSize == 4) {
+            cubeExpanding = false;
+        }
+        else if (cubeSize == 2) {
+            cubeExpanding = true;
+        }
+    }
+}
+
+void drawCube(uint8_t x, uint8_t y, uint8_t z, uint8_t s) {
+    for (uint8_t i = 0; i < s; i++) {
+        // Sets front left corner
+        setVoxel(x, y + i, z);
+        setVoxel(x + i, y, z);
+        setVoxel(x, y, z + i);
+
+        // Sets the back right corner
+        setVoxel(x + s - 1, y + i, z + s - 1);
+        setVoxel(x + i, y + s - 1, z + s - 1);
+        setVoxel(x + s - 1, y + s - 1, z + i);
+
+        // There's gaps in some rows, these fill them in
+        setVoxel(x + s - 1, y + i, z);
+        setVoxel(x, y + i, z + s - 1);
+        setVoxel(x + i, y + s - 1, z);
+        setVoxel(x + i, y, z + s - 1);
+        setVoxel(x + s - 1, y, z + i);
+        setVoxel(x, y + s - 1, z + i);
+    } 
 }
 
 void clearCube() {
