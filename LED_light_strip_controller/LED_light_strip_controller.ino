@@ -1,10 +1,10 @@
+#include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <FastLED.h>
 #include <EEPROM.h>
 #include <arduino_homekit_server.h>
 #include "wifi_credentials.h"
-#include "color_remote.h"
 
 // 
 // LED Light Strip controller doodad
@@ -18,17 +18,19 @@
 
 #define LED_PIN         5
 #define POWER_RELAY_PIN 14
-#define NUM_LEDS        1
+#define NUM_LEDS        10
 #define SERVICE_PORT    1234
 
 WiFiServer server(SERVICE_PORT);
 CRGB leds[NUM_LEDS];
 CRGB currentColor = CRGB::White;
+CHSV currentHSVColor = CHSV(HUE_YELLOW, 255, 255);
 #define MAX_CURRENT_EFFECT_LENGTH   64
 char currentEffect[MAX_CURRENT_EFFECT_LENGTH] = "none";
 uint8_t brightness = 40;
 uint8_t effectHue = 0; // rotating base color used by effects
 void (*currentEffectFunc)(void) = NULL;
+#define RESET_STORED_VALUES 0   // Set to 1 to reset EEPROM values to the standard (defined above)
 
 // Stuff for ZeroConf/Bonjour
 bool bHostDomainConfirmed = false;
@@ -38,12 +40,13 @@ MDNSResponder::hMDNSServiceQuery hMDNSServiceQuery = NULL;
 const char *serviceIdent = "ledicious";
 
 // EEPROM addresses
-int addr_savedColor      = 0;   // 3 bytes
-int addr_savedBrightness = 3;   // 1 byte
-int addr_savedEffect     = 4;   // MAX_CURRENT_EFFECT_LENGTH bytes (64)
+int addr_offset          = 100;               // Someone (probably the HomeKit stuff) is scribbling in the lower memory addresses
+int addr_savedColor      = addr_offset + 0;   // 3 bytes
+int addr_savedBrightness = addr_offset + 3;   // 1 byte
+int addr_savedEffect     = addr_offset + 4;   // MAX_CURRENT_EFFECT_LENGTH bytes (64)
 
 // HomeKit characteristics defined in lightstrip_accessory.c
-extern "C" homekit_server_config_t config;
+extern "C" homekit_server_config_t homekit_config;
 extern "C" homekit_characteristic_t cha_switch_on;
 extern "C" homekit_characteristic_t cha_brightness;
 extern "C" homekit_characteristic_t cha_saturation;
@@ -60,12 +63,19 @@ typedef struct t_results {
 
 
 void setup() {
-    pinMode(POWER_RELAY_PIN, OUTPUT);
-    digitalWrite(POWER_RELAY_PIN, LOW);
-    
     Serial.begin(9600);
     delay(100);
     Serial.println(F("Well, hello there..."));
+
+    FastLED.addLeds<WS2812,LED_PIN,GRB>(leds, NUM_LEDS);
+    FastLED.setMaxPowerInVoltsAndMilliamps(5, 1000);
+    fill_solid(leds, NUM_LEDS, currentHSVColor);
+    FastLED.setBrightness(brightness); 
+
+    pinMode(POWER_RELAY_PIN, OUTPUT);
+    digitalWrite(POWER_RELAY_PIN, LOW);
+    cha_switch_on.value.bool_value = false;
+    
     EEPROM.begin(1024);
 
     WiFi.begin(wifi_ssid, wifi_password);
@@ -93,18 +103,17 @@ void setup() {
         Serial.println("mDNS should be working");
     }
 
+#if RESET_STORED_VALUES
+    storeCurrentColor();
+    storeBrightness();
+    storeEffect();
+#else
     // Load any values from memory
     loadCurrentColor();
- //   loadBrightness();
-    storeBrightness();
+    loadBrightness();
     loadEffect();
+#endif
     setEffectFuncPtr();
-
-    FastLED.addLeds<WS2812,LED_PIN,GRB>(leds, NUM_LEDS);
-    FastLED.setMaxPowerInVoltsAndMilliamps(5, 10000);
-    fill_solid(leds, NUM_LEDS, currentColor);
-    FastLED.setBrightness(brightness); 
-    FastLED.show();
 
 #if RESET_HOMEKIT
     homekit_storage_reset();
@@ -113,7 +122,12 @@ void setup() {
     cha_switch_on.setter = cha_switch_on_setter;
     cha_brightness.setter = cha_brightness_setter;
     cha_saturation.setter = cha_saturation_setter;
-    arduino_homekit_setup(&config);
+    arduino_homekit_setup(&homekit_config);
+    // Finally figured out why the LEDs were just not working right. `arduino_homekit_setup` sets the clock speed to 160Mhz and
+    // that messes everything up. Resetting back to 80Mhz gets everyone working again (although the HomeKit routines do appear
+    // much slower now).
+    system_update_cpu_freq(SYS_CPU_80MHZ);
+
 }
 
 unsigned long lastValue = 0;
@@ -130,6 +144,7 @@ void logColor(CRGB c) {
 void loadCurrentColor() { mem_currentColor(false); }
 void storeCurrentColor() { mem_currentColor(true); }
 void mem_currentColor(bool saving) {
+return;
     uint8_t r = EEPROM.read(addr_savedColor);
     uint8_t g = EEPROM.read(addr_savedColor+1);
     uint8_t b = EEPROM.read(addr_savedColor+2);
@@ -154,12 +169,14 @@ void mem_currentColor(bool saving) {
         Serial.printf("Loaded color 0x%02X%02X%02X from memory\n", r, g, b);
 #endif
         currentColor = CRGB(r, g, b);
+//        currentHSVColor = CHSV();
     }
 }
 
 void loadBrightness() { mem_brightness(false); }
 void storeBrightness() { mem_brightness(true); }
 void mem_brightness(bool saving) {
+return;
     uint8_t b = EEPROM.read(addr_savedBrightness);
     if (saving) {
         if (b != brightness) { 
@@ -167,8 +184,8 @@ void mem_brightness(bool saving) {
             EEPROM.commit();
         }
 
-//        uint8_t x = EEPROM.read(addr_savedBrightness);
-//        Serial.printf("memcheck brightness: %hhu\n", x);
+        uint8_t x = EEPROM.read(addr_savedBrightness);
+        Serial.printf("memcheck brightness: %hhu\n", x);
     }
     else {
 #if DEBUG
@@ -181,6 +198,7 @@ void mem_brightness(bool saving) {
 void loadEffect() { mem_effect(false); }
 void storeEffect() { mem_effect(true); }
 void mem_effect(bool saving) {
+return;
     char e[MAX_CURRENT_EFFECT_LENGTH];
     bzero(e, MAX_CURRENT_EFFECT_LENGTH);
     EEPROM.get(addr_savedEffect, e);
@@ -209,7 +227,14 @@ void updateEffects() {
     if (currentEffectFunc != NULL) {
         (*currentEffectFunc)();
     }
+    else {
+        if (cha_switch_on.value.bool_value == true) {
+            FastLED.show();
+        }
+    }
 }
+
+static bool hasInitdFastLEDOnce = false;
 
 bool isHigh = true;
 void loop() {
@@ -220,6 +245,17 @@ void loop() {
 //        delay(5000);
 //    }
 
+//    if (cha_switch_on.value.bool_value == true && !hasInitdFastLEDOnce) {
+    if (!hasInitdFastLEDOnce) {
+//        Serial.println("SEtting up FastLED");
+//        FastLED.addLeds<WS2812,LED_PIN,GRB>(leds, NUM_LEDS);
+//        FastLED.setMaxPowerInVoltsAndMilliamps(5, 500);
+//        fill_solid(leds, NUM_LEDS, CRGB::White);
+//        FastLED.setBrightness(128); 
+//        FastLED.show();
+//        delay(50);
+        hasInitdFastLEDOnce = true;
+    }
     
     MDNS.update();
     my_homekit_loop();
@@ -361,9 +397,10 @@ void my_homekit_loop() {
 
 void cha_switch_on_setter(const homekit_value_t value) {
     bool onValue = value.bool_value;
-    cha_switch_on.value.bool_value = onValue;    //sync the value
+    cha_switch_on.value.bool_value = onValue;
     Serial.printf("Switch: %s\n", onValue ? "ON" : "OFF");
-// TODO - jimt - Need a relay to trigger to turn off the lights.
+    digitalWrite(POWER_RELAY_PIN, onValue ? HIGH : LOW);
+//    delay(1500);
 }
 
 // Brightness is 0-100
@@ -389,10 +426,11 @@ void cha_hue_setter(const homekit_value_t value) {
     Serial.printf("hue: %d\n", h);
 
     uint8_t newHue = (uint8_t)(h * 255 / 360);
-    currentColor.setHue(newHue);
+//    currentColor.setHue(newHue);
+    currentHSVColor = CHSV(newHue, 255, 255);
     storeCurrentColor();
-    fill_solid(leds, NUM_LEDS, currentColor);
-    FastLED.show();
+    fill_solid(leds, NUM_LEDS, currentHSVColor);
+//    FastLED.show();
 
 }
 
