@@ -1,10 +1,13 @@
 #include <Arduino.h>
+#include <pgmspace.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <FastLED.h>
 #include <EEPROM.h>
 #include <arduino_homekit_server.h>
 #include "wifi_credentials.h"
+#include <homekit/characteristics.h>
+#include <homekit/types.h>
 
 // 
 // LED Light Strip controller doodad
@@ -13,7 +16,7 @@
 //         that they blit the entire size given to begin() each time commit() is called. It's a bit weird.
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////
-#define DEBUG 1
+#define _DEBUG_ 1
 #define LOG_EFFECT 0 // Set to 1 to see effect names as they're called. It's going to slow things down though...
 
 #define LED_PIN         5
@@ -27,19 +30,48 @@
 WiFiServer server(SERVICE_PORT);
 #endif
 
+//#define MAX_CURRENT_EFFECT_LENGTH   64
+//typedef struct _effect {
+//    uint8_t id;
+//    char name[MAX_CURRENT_EFFECT_LENGTH];
+//} Effect;
+//static Effect const effects[] = { 
+//                            0, "none",              // This is the "solid color" effect, the user setting something specific
+//                            1, "trails",
+//                            2, "rainbow",
+//                            3, "rainbowGlitter",
+//                            4, "confetti",
+//                            5, "sinelon",
+//                            6, "bpm",
+//                            7, "juggle"
+//                          };
+//static int const numEffects = sizeof(effects) / sizeof(Effect);
+typedef enum t_effects {
+    none = 0,
+    trails,
+    rainbow,
+    rainbowGlitter,
+    confetti,
+    sinelon,
+    bpm,
+    juggle,
+
+    totalNumberOfEffects
+} Effect;
+static const char *effectNames[totalNumberOfEffects] = { "LED Light Strip", "Trails", "Rainbow", "Rainbow w/ Glitter", 
+                                                         "Confetti", "Sinelon", "BPM", "Juggle" };
 
 CRGB leds[NUM_LEDS];
 CRGB currentColor = CRGB::White;
 CHSV currentHSVColor = CHSV(HUE_BLUE, 255, 255);
-#define MAX_CURRENT_EFFECT_LENGTH   64
-char currentEffect[MAX_CURRENT_EFFECT_LENGTH] = "none";
-uint8_t brightness = 128;
+Effect currentEffect = none;
+//uint8_t brightness = 128;
 uint8_t effectHue = 0; // rotating base color used by effects
 void (*currentEffectFunc)(void) = NULL;
 #define RESET_STORED_VALUES 0   // Set to 1 to reset EEPROM values to the standard (defined above)
 
-// Stuff for ZeroConf/Bonjour
 #if RUN_WEB_SERVER
+// Stuff for ZeroConf/Bonjour
 bool bHostDomainConfirmed = false;
 char *pcHostDomain = NULL;
 MDNSResponder::hMDNSService hMDNSService = NULL;
@@ -48,10 +80,10 @@ const char *serviceIdent = "ledicious";
 #endif
 
 // EEPROM addresses
-int addr_offset          = 100;               // Someone (probably the HomeKit stuff) is scribbling in the lower memory addresses
+int addr_offset          = 1408;              // HomeKit reserves the lower 1408 bytes
 int addr_savedColor      = addr_offset + 0;   // 3 bytes
-int addr_savedBrightness = addr_offset + 3;   // 1 byte
-int addr_savedEffect     = addr_offset + 4;   // MAX_CURRENT_EFFECT_LENGTH bytes (64)
+int addr_savedEffect     = addr_offset + 3;   // 1 byte
+int addr_savedBrightness = addr_offset + 4;   // + effect idx offset (see t_effects enum above). 1 byte
 
 // HomeKit characteristics defined in lightstrip_accessory.c
 extern "C" homekit_server_config_t homekit_config;
@@ -60,8 +92,14 @@ extern "C" homekit_characteristic_t cha_brightness;
 extern "C" homekit_characteristic_t cha_saturation;
 extern "C" homekit_characteristic_t cha_hue;
 
+extern "C" homekit_characteristic_t cha_trails_switch_on;
+extern "C" homekit_characteristic_t cha_trails_brightness;
+extern "C" homekit_characteristic_t cha_trails_name;
+
 extern "C" homekit_characteristic_t cha_rainbow_switch_on;
 extern "C" homekit_characteristic_t cha_rainbow_brightness;
+extern "C" homekit_characteristic_t cha_rainbow_name;
+
 static bool inPairingMode = false;  // Hold the pairing button during restart to enter pairing mode (deletes existing pairs, overclocks CPU)
 #define REPORT_HOMEKIT_USAGE    0   // Set to 1 to see periodic HomeKit stats
 
@@ -96,12 +134,12 @@ void setup() {
     }
     
     Serial.println("");
-    Serial.println("WiFi connected");  
-    Serial.print("IP address: ");
+    Serial.println(F("WiFi connected"));  
+    Serial.print(F("IP address: "));
     Serial.println(WiFi.localIP());
-    Serial.print("Netmask: ");
+    Serial.print(F("Netmask: "));
     Serial.println(WiFi.subnetMask());
-    Serial.print("Gateway: ");
+    Serial.print(F("Gateway: "));
     Serial.println(WiFi.gatewayIP());
 
 #if RUN_WEB_SERVER
@@ -109,21 +147,21 @@ void setup() {
 
     MDNS.setHostProbeResultCallback(hostProbeCallback);
     if (!MDNSResponder::indexDomain(pcHostDomain, 0, "arduino_1") || !MDNS.begin(pcHostDomain)) { 
-        Serial.println("Crud... mDNS did not start");
+        Serial.println(F("Crud... mDNS did not start"));
     }
     else {
-        Serial.println("mDNS should be working");
+        Serial.println(F("mDNS should be working"));
     }
 #endif
 
 #if RESET_STORED_VALUES > 0
     storeCurrentColor();
-    storeBrightness();
+//    storeBrightness();
     storeEffect();
 #else
     // Load any values from memory
     loadCurrentColor();
-    loadBrightness();
+//    loadBrightness();
     loadEffect();
 #endif
     setEffectFuncPtr();
@@ -131,7 +169,7 @@ void setup() {
     FastLED.addLeds<WS2812,LED_PIN,GRB>(leds, NUM_LEDS);
     FastLED.setMaxPowerInVoltsAndMilliamps(5, 10000);
     fill_solid(leds, NUM_LEDS, currentHSVColor);
-    FastLED.setBrightness(brightness);
+    FastLED.setBrightness(fetchBrightness(currentEffect));
 
     my_homekit_setup();
 }
@@ -143,7 +181,7 @@ char str[128];
 bool isOn = true;
 
 void logColor(CRGB c) {
-    sprintf(str, "Current color: 0x%02X%02X%02X", c.red, c.green, c.blue);
+    sprintf_P(str, PSTR("Current color: 0x%02X%02X%02X"), c.red, c.green, c.blue);
     Serial.println(str);
 }
 
@@ -152,80 +190,89 @@ void storeCurrentColor() { mem_currentColor(true); }
 void mem_currentColor(bool saving) {
     uint8_t hue = EEPROM.read(addr_savedColor);
     uint8_t saturation = EEPROM.read(addr_savedColor+1);
-//    uint8_t b = EEPROM.read(addr_savedColor+2);
 
     if (saving) {
         bool commit = false;
         if (hue != currentHSVColor.hue)               { EEPROM.write(addr_savedColor, currentHSVColor.hue); commit = true; }
         if (saturation != currentHSVColor.saturation) { EEPROM.write(addr_savedColor+1, currentHSVColor.saturation); commit = true; }
-//        if (b != currentColor.blue)  { EEPROM.write(addr_savedColor+2, currentColor.blue); commit = true; }
 
         if (commit) {
             EEPROM.commit();
         }
 
-        uint8_t _h = EEPROM.read(addr_savedColor);
-        uint8_t _s = EEPROM.read(addr_savedColor+1);
-        Serial.printf("memcheck color: commit:(%s) hue(%hhu) saturation(%hhu)\n", commit ? "true" : "false", _h, _s);
+//        uint8_t _h = EEPROM.read(addr_savedColor);
+//        uint8_t _s = EEPROM.read(addr_savedColor+1);
+//        Serial.printf_P(PSTR("memcheck color: commit:(%s) hue(%hhu) saturation(%hhu)\n"), commit ? "true" : "false", _h, _s);
     }
     else {
-#if DEBUG
-        Serial.printf("Loaded color hue(%hhu) saturation(%hhu) from memory\n", hue, saturation);
+#if _DEBUG_
+        Serial.printf_P(PSTR("Loaded color hue(%hhu) saturation(%hhu) from memory\n"), hue, saturation);
 #endif
-        currentHSVColor = CHSV(hue, saturation, brightness);
+        // We almost always reset the brightness later. But there's not a context in which we save a color that 
+        // isn't attached to the "none" effect, so this is a legit lookup.
+        currentHSVColor = CHSV(hue, saturation, fetchBrightness(none));
     }
 }
 
-void loadBrightness() { mem_brightness(false); }
-void storeBrightness() { mem_brightness(true); }
-void mem_brightness(bool saving) {
-    uint8_t b = EEPROM.read(addr_savedBrightness);
+//void loadBrightness() { mem_brightness(false, totalNumberOfEffects + 1); }
+uint8_t fetchBrightness(Effect tgtEffect) { return mem_brightness(false, tgtEffect, 0); }
+void storeBrightness(Effect tgtEffect, uint8_t brightness) { (void)mem_brightness(true, tgtEffect, brightness); }
+uint8_t mem_brightness(bool saving, Effect effect, uint8_t brightness) {
+    if (effect < none || effect >= totalNumberOfEffects) {
+        Serial.printf_P(PSTR("mem_brightness received invalid effect [%d]\n"), effect);
+        return 0; // hello darkness, my old friend
+    }
+    int addr = addr_savedBrightness + effect;
+    uint8_t b = EEPROM.read(addr);
     if (saving) {
         if (b != brightness) { 
-            EEPROM.write(addr_savedBrightness, brightness);
+            EEPROM.write(addr, brightness);
             EEPROM.commit();
         }
 
-        uint8_t x = EEPROM.read(addr_savedBrightness);
-        Serial.printf("memcheck brightness: %hhu\n", x);
+//        uint8_t x = EEPROM.read(addr);
+//        Serial.printf_P(PSTR("memcheck brightness: %hhu\n"), x);
+        return 0; // not used
     }
     else {
-#if DEBUG
-        Serial.printf("Loaded brightness %hhu from memory\n", b);
+#if _DEBUG_
+        Serial.printf_P(PSTR("Loaded brightness %hhu for effect %d from memory\n"), b, effect);
 #endif
-        brightness = b;
+        return b;
     }
 }
 
 void loadEffect() { mem_effect(false); }
 void storeEffect() { mem_effect(true); }
 void mem_effect(bool saving) {
-    char e[MAX_CURRENT_EFFECT_LENGTH];
-    bzero(e, MAX_CURRENT_EFFECT_LENGTH);
-    EEPROM.get(addr_savedEffect, e);
+    Effect e = (Effect)EEPROM.read(addr_savedEffect);
+//    char e[MAX_CURRENT_EFFECT_LENGTH];
+//    bzero(e, MAX_CURRENT_EFFECT_LENGTH);
+//    EEPROM.get(addr_savedEffect, e);
     if (saving) {
-        if (strncmp(currentEffect, e, MAX_CURRENT_EFFECT_LENGTH) != 0) {
-            EEPROM.put(addr_savedEffect, currentEffect);
+        if (e != currentEffect) {
+            EEPROM.write(addr_savedEffect, currentEffect);
             EEPROM.commit();
         }
-
-//        bzero(e, MAX_CURRENT_EFFECT_LENGTH);
-//        EEPROM.get(addr_savedEffect, e);
-//        Serial.printf("memcheck effect name: [%s]\n", e);
+//        if (strncmp(currentEffect, e, MAX_CURRENT_EFFECT_LENGTH) != 0) {
+//            EEPROM.put(addr_savedEffect, currentEffect);
+//            EEPROM.commit();
+//        }
     }
     else {
-#if DEBUG
-        Serial.printf("Loaded currentEffect %s from memory\n", e);
+#if _DEBUG_
+        Serial.printf("Loaded currentEffect %d from memory\n", e);
 #endif
-        strncpy(currentEffect, e, MAX_CURRENT_EFFECT_LENGTH);
+//        strncpy(currentEffect, e, MAX_CURRENT_EFFECT_LENGTH);
     }
 }
 
 void updateEffects() {
-    EVERY_N_MILLISECONDS(20) {
-        effectHue++;
-    }
     if (currentEffectFunc != NULL) {
+        EVERY_N_MILLISECONDS(20) {
+            effectHue++;
+        }
+
         (*currentEffectFunc)();
     }
     else {
@@ -250,12 +297,12 @@ void loop() {
             if (client.available()) {
                 String cLine = client.readStringUntil('\r');
                 cLine.trim();
-#if DEBUG
+#if _DEBUG_
                 Serial.printf("received command: %s\n", cLine.c_str());
 #endif
                 CmdResults *r = commandProcessor(cLine);
 
-#if DEBUG
+#if _DEBUG_
                 Serial.printf("code: %d msg: %s\n", r->code, r->msg);
 #endif
                 
@@ -283,15 +330,15 @@ void loop() {
 }
 
 void setEffectFuncPtr() {
-    if (strcmp(currentEffect, "none") == 0)                 { currentEffectFunc = NULL; }
-    else if (strcmp(currentEffect, "trails") == 0)          { currentEffectFunc = &trails; }
-    else if (strcmp(currentEffect, "rainbow") == 0)         { currentEffectFunc = &rainbow; } 
-    else if (strcmp(currentEffect, "rainbowGlitter") == 0)  { currentEffectFunc = &rainbowWithGlitter; } 
-    else if (strcmp(currentEffect, "confetti") == 0)        { currentEffectFunc = &confetti; } 
-    else if (strcmp(currentEffect, "sinelon") == 0)         { currentEffectFunc = &sinelon; } 
-    else if (strcmp(currentEffect, "bpm") == 0)             { currentEffectFunc = &bpm; } 
-    else if (strcmp(currentEffect, "juggle") == 0)          { currentEffectFunc = &juggle; }
-    else { Serial.printf("Unknown effect [%s] in setEffectFuncPtr\n", currentEffect); }
+    if (currentEffect == none)                 { currentEffectFunc = NULL; }
+    else if (currentEffect == trails)          { currentEffectFunc = &f_trails; }
+    else if (currentEffect == rainbow)         { currentEffectFunc = &f_rainbow; } 
+    else if (currentEffect == rainbowGlitter)  { currentEffectFunc = &f_rainbowWithGlitter; } 
+    else if (currentEffect == confetti)        { currentEffectFunc = &f_confetti; } 
+    else if (currentEffect == sinelon)         { currentEffectFunc = &f_sinelon; } 
+    else if (currentEffect == bpm)             { currentEffectFunc = &f_bpm; } 
+    else if (currentEffect == juggle)          { currentEffectFunc = &f_juggle; }
+    else { Serial.printf_P(PSTR("Unknown effect [%d] in setEffectFuncPtr\n"), currentEffect); }
 }
 
 #if RUN_WEB_SERVER
@@ -391,13 +438,22 @@ void my_homekit_setup() {
     cha_brightness.setter = cha_brightness_setter;
     cha_saturation.setter = cha_saturation_setter;
 
-    cha_rainbow_switch_on.setter = cha_rainbow_switch_on_setter;
-    cha_rainbow_brightness.setter = cha_rainbow_brightness_setter;
-
     // Set the HomeKit Characteristics to their defaults as restored from memory. HomeKit uses this to update it's UI.
-    cha_brightness.value.int_value = (brightness * 100 / 255);
+    cha_brightness.value.int_value = (fetchBrightness(none) * 100 / 255);
     cha_saturation.value.float_value = (float)(currentHSVColor.saturation * 100.0 / 255.0);
     cha_hue.value.int_value = (uint8_t)(currentHSVColor.hue * 360.0 / 255.0);
+
+    // Now set up each effect's switch
+    cha_trails_switch_on.setter_ex = common_effect_switch_on_setter;
+    cha_trails_brightness.setter_ex = cha_rainbow_brightness_setter;
+    cha_trails_brightness.value.int_value = (fetchBrightness(trails) * 100 / 255);
+    cha_trails_name.value.string_value = strdup(effectNames[trails]);
+    
+    cha_rainbow_switch_on.setter_ex = common_effect_switch_on_setter;
+    cha_rainbow_brightness.setter_ex = cha_rainbow_brightness_setter;
+    cha_rainbow_brightness.value.int_value = (fetchBrightness(rainbow) * 100 / 255);
+    cha_rainbow_name.value.string_value = strdup(effectNames[rainbow]);
+
 
     arduino_homekit_setup(&homekit_config);
 
@@ -405,20 +461,20 @@ void my_homekit_setup() {
     // that messes everything up. Resetting back to 80Mhz gets everyone working again (although the HomeKit routines do appear
     // much slower now).
     if (!inPairingMode) {
-        system_update_cpu_freq(SYS_CPU_80MHZ);
+//        system_update_cpu_freq(SYS_CPU_80MHZ);
     }
 }
 
 void cha_switch_on_setter(const homekit_value_t value) {
     bool onValue = value.bool_value;
     cha_switch_on.value.bool_value = onValue;
-#if DEBUG
+#if _DEBUG_
     Serial.printf("Switch: %s\n", onValue ? "ON" : "OFF");
 #endif
 
     // If an effect is enabled, turn it off
-    if (strcmp(currentEffect, "none") != 0) {
-        strncpy(currentEffect, "none", MAX_CURRENT_EFFECT_LENGTH);
+    if (currentEffect != none) {
+        currentEffect = none;
         storeEffect();
         fill_solid(leds, NUM_LEDS, currentHSVColor);
     }
@@ -429,13 +485,13 @@ void cha_switch_on_setter(const homekit_value_t value) {
 // Brightness is 0-100
 void cha_brightness_setter(const homekit_value_t value) {
     int b = value.int_value;
-#if DEBUG
+#if _DEBUG_
     Serial.printf("brightness: %d\n", b);
 #endif
 
     cha_brightness.value.int_value = b;
-    brightness = (uint8_t)ceilf(b * 255.0 / 100.0);
-    storeBrightness();
+    uint8_t brightness = (uint8_t)ceilf(b * 255.0 / 100.0);
+    storeBrightness(currentEffect, brightness);
     currentHSVColor.value = brightness;
     FastLED.setBrightness(brightness);
 }
@@ -464,7 +520,7 @@ void _colorSetter() {
 // And for some reason, this comes in as a float
 void cha_saturation_setter(const homekit_value_t value) {
     float s = value.float_value;
-#if DEBUG
+#if _DEBUG_
     Serial.printf("saturation: %f\n", s);
 #endif
 
@@ -478,7 +534,7 @@ void cha_saturation_setter(const homekit_value_t value) {
 // Hue is 0-360
 void cha_hue_setter(const homekit_value_t value) {
     int h = (int)value.float_value;
-#if DEBUG
+#if _DEBUG_
     Serial.printf("hue: %d\n", h);
 #endif
 
@@ -489,14 +545,86 @@ void cha_hue_setter(const homekit_value_t value) {
     _colorSetter();
 }
 
+//
+// Effects processing (from HomeKit)
+//
+///////////////////////////////////////////////////////////////////////////
+Effect _effectForCharacteristic(homekit_characteristic_t *tgt) {
+    Effect effect = totalNumberOfEffects;
+    char *serviceName = NULL;
+    for (homekit_characteristic_t **ptr=tgt->service->characteristics; *ptr ; ++ptr) {
+        if ((*ptr)->type == HOMEKIT_CHARACTERISTIC_NAME) {
+            for (int e=0; e<(int)totalNumberOfEffects; e++) {
+                if (strcmp(effectNames[e], (*ptr)->value.string_value) == 0) {
+                    effect = (Effect)e;
+                    break;
+                }
+            }
+            serviceName = (*ptr)->value.string_value;
+            break;
+        }
+    }
+
+    if (effect == totalNumberOfEffects) {
+        Serial.printf_P(PSTR("Failed to find effect for service %s\n"), serviceName);
+        return totalNumberOfEffects;
+    }
+    else {
+        return effect;
+    }
+}
+
+void _effect_switch_on_setter(Effect effect, homekit_characteristic_t *tgtCharacteristic, const homekit_value_t value) {
+    
+}
+
+void common_effect_switch_on_setter(homekit_characteristic_t *ch, const homekit_value_t value) {
+    static homekit_characteristic_t *lastCharacteristic = NULL;
+    Effect e = _effectForCharacteristic(ch);
+    if (e < totalNumberOfEffects) {
+//        _effect_switch_on_setter(e, ch, value);
+        bool onValue = value.bool_value;
+        if (lastCharacteristic == ch && onValue == ch->value.bool_value) {
+            // No-op. The same characteristic is asking for the same value. Weird... could be the other switch is trying to update.
+            Serial.printf("Same last char, same value... ignoring request from %x\n", ch);
+            return;
+        }
+        
+        ch->value.bool_value = onValue;
+
+        if (onValue) {
+            Serial.printf("Last char: %x (bool_value: %d)\n", lastCharacteristic, (lastCharacteristic) ? lastCharacteristic->value.bool_value : 7);
+            // Turn off any previous effect, then just switcht to the next effect
+            if (lastCharacteristic) {
+                lastCharacteristic->value.bool_value = false;
+                Serial.printf("Last char turned off: %d\n", lastCharacteristic->value.bool_value);
+            }
+            lastCharacteristic = ch;
+            currentEffect = e;
+            Serial.printf("Last char now: %x (currentEffect: %d)\n", lastCharacteristic, (int)currentEffect);
+        }
+        else {
+            lastCharacteristic = NULL;
+            currentEffect = none;
+            // When turning off, fill the LEDs with 0 saturated red (black) so that they won't flash when we turn them on again
+            fill_solid(leds, NUM_LEDS, CHSV(HUE_RED, 0, 0));
+        }
+        storeEffect();
+        setEffectFuncPtr();
+
+        digitalWrite(POWER_RELAY_PIN, onValue ? HIGH : LOW);
+    }
+}
+
 
 // Effects test
-void cha_rainbow_switch_on_setter(const homekit_value_t value) {
+void cha_rainbow_switch_on_setter(homekit_characteristic_t *ch, const homekit_value_t value) {
+    
     bool onValue = value.bool_value;
     cha_rainbow_switch_on.value.bool_value = onValue;
     digitalWrite(POWER_RELAY_PIN, onValue ? HIGH : LOW);
 
-    strncpy(currentEffect, onValue ? "rainbow" : "none", MAX_CURRENT_EFFECT_LENGTH);
+    currentEffect = onValue ? rainbow : none;
     storeEffect();
     setEffectFuncPtr();
     // Any time an effect gets turned off, we need to refill the current color otherwise the lights will be stuck on whatever was last shown.
@@ -506,12 +634,21 @@ void cha_rainbow_switch_on_setter(const homekit_value_t value) {
 }
 
 // Brightness is 0-100
-void cha_rainbow_brightness_setter(const homekit_value_t value) {
+void cha_rainbow_brightness_setter(homekit_characteristic_t *ch, const homekit_value_t value) {
     int b = value.int_value;
-    Serial.printf("cha_rainbow_brightness_setter: %d\n", b);
+//    Serial.printf("cha_rainbow_brightness_setter: %d\n", b);
+//    Serial.printf("id: %d type: %s\n", ch->service->id, ch->service->type);
+
+//    for (homekit_characteristic_t **ptr=ch->service->characteristics; *ptr ; ++ptr) {
+//        if ((*ptr)->type == HOMEKIT_CHARACTERISTIC_NAME) {
+//            Serial.printf("Found something: %s\n", (*ptr)->value.string_value);
+//            break;
+//        }
+//    }
 
     cha_rainbow_brightness.value.int_value = b;
     uint8_t effectBrightness = (uint8_t)ceilf(b * 255.0 / 100.0);
+    storeBrightness(currentEffect, effectBrightness);
     FastLED.setBrightness(effectBrightness);
 }
 
@@ -521,19 +658,18 @@ void cha_rainbow_brightness_setter(const homekit_value_t value) {
 //
 // Reminder - All effects must handle calling FastLED.show() themselves.
 ///////////////////////////////////////////////////////////////////////////
-void fadeall() { 
+#if LOG_EFFECT
+    #define __logEffect Serial.printf("%s\n", __func__)
+#else
+    #define __logEffect
+#endif
+
+void _fadeall() { 
     for(int i = 0; i < NUM_LEDS; i++) { leds[i].nscale8(250); } 
 }
 
-void __logEffect(const char *funcName) {
-#if LOG_EFFECT
-    Serial.printf("%s\n", funcName);
-#endif
-    
-}
-
-void trails() {
-    __logEffect(__func__);
+void f_trails() {
+    __logEffect;
     // First slide the led in one direction
     for(int i = 0; i < NUM_LEDS; i++) {
         // Set the i'th led to red 
@@ -542,7 +678,7 @@ void trails() {
         FastLED.show(); 
         // now that we've shown the leds, reset the i'th led to black
         // leds[i] = CRGB::Black;
-        fadeall();
+        _fadeall();
         // Wait a little bit before we loop around and do it again
         delay(10);
     }
@@ -555,21 +691,21 @@ void trails() {
         FastLED.show();
         // now that we've shown the leds, reset the i'th led to black
         // leds[i] = CRGB::Black;
-        fadeall();
+        _fadeall();
         // Wait a little bit before we loop around and do it again
         delay(10);
     }
 }
 
-void rainbow() {
-    __logEffect(__func__);
+void f_rainbow() {
+    __logEffect;
     fill_rainbow(leds, NUM_LEDS, effectHue, 7);
     FastLED.show();
 }
 
-void rainbowWithGlitter() {
-    __logEffect(__func__);
-    rainbow();
+void f_rainbowWithGlitter() {
+    __logEffect;
+    f_rainbow();
     _addGlitter(80);
 }
 
@@ -579,24 +715,24 @@ void _addGlitter(fract8 chanceOfGlitter) {
     }
 }
 
-void confetti() {
-    __logEffect(__func__);
+void f_confetti() {
+    __logEffect;
     // random colored speckles that blink in and fade smoothly
     fadeToBlackBy(leds, NUM_LEDS, 10);
     int pos = random16(NUM_LEDS);
     leds[pos] += CHSV(effectHue + random8(64), 200, 255);
 }
 
-void sinelon() {
-    __logEffect(__func__);
+void f_sinelon() {
+    __logEffect;
     // a colored dot sweeping back and forth, with fading trails
     fadeToBlackBy(leds, NUM_LEDS, 20);
     int pos = beatsin16(13, 0, NUM_LEDS-1);
     leds[pos] += CHSV(effectHue, 255, 192);
 }
 
-void bpm() {
-    __logEffect(__func__);
+void f_bpm() {
+    __logEffect;
     // colored stripes pulsing at a defined Beats-Per-Minute (BPM)
     uint8_t BeatsPerMinute = 62;
     CRGBPalette16 palette = PartyColors_p;
@@ -606,8 +742,8 @@ void bpm() {
     }
 }
 
-void juggle() {
-    __logEffect(__func__);
+void f_juggle() {
+    __logEffect;
     // eight colored dots, weaving in and out of sync with each other
     fadeToBlackBy(leds, NUM_LEDS, 20);
     byte dothue = 0;
@@ -618,11 +754,11 @@ void juggle() {
 }
 
 
+#if RUN_WEB_SERVER
 //
 // ZeroConf/Bonjour things
 //
 ///////////////////////////////////////////////////////////////////////////
-#if RUN_WEB_SERVER
 void serviceProbeResult(String p_pcServiceName, const MDNSResponder::hMDNSService p_hMDNSService, bool p_bProbeResult) {
     (void) p_hMDNSService;
     Serial.printf("MDNSServiceProbeResultCallback: Service '%s' probe %s\n", p_pcServiceName.c_str(), (p_bProbeResult ? "succeeded." : "failed!"));
