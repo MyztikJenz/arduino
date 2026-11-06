@@ -7,6 +7,17 @@
 
 import SwiftUI
 
+struct MyButtonStyle : ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundColor(.white)
+            .padding()
+            .frame(minWidth: 100.0, idealWidth: 100.0, maxWidth: 100.0, minHeight: 50.0, idealHeight: 50.0, maxHeight: 50.0, alignment: .center)
+            .background(LinearGradient(gradient: Gradient(colors: [Color.blue, Color(.displayP3, red: 89.0/255.0, green: 196.0/255.0, blue: 246.0/255.0, opacity: 1.0)]), startPoint: .leading, endPoint: .trailing))
+            .cornerRadius(15.0)
+    }
+}
+
 struct LEDServerDetail: View {
     var conn: NetworkDoodad? = nil
     @ObservedObject var ledServer:LEDServer
@@ -14,17 +25,17 @@ struct LEDServerDetail: View {
     var body: some View {
         VStack {
             HStack {
-                Spacer()
-                VStack {
+                VStack(alignment: .center, spacing: 20.0) {
+                    Spacer()
                     Button("On") {
                         print("on")
                     }
-                    .padding()
                     Button("Off") {
                         print("off")
                     }
-                    .padding()
+                    Spacer()
                 }
+                .buttonStyle(MyButtonStyle())
                 Spacer()
                 ColorPicker(selection: $ledServer.color, supportsOpacity: false) {
                 }

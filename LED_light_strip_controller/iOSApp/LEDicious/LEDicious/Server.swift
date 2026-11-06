@@ -11,7 +11,12 @@ import SwiftUI
 enum Effect : String, CaseIterable {
     case none
     case trails
-    case somethingElse
+    case rainbow
+    case rainbowWithGlitter
+    case confetti
+    case sinelon
+    case bpm
+    case juggle
     
     static func allEffects() -> [String] {
         return Effect.allCases.map { $0.rawValue }

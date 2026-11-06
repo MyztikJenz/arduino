@@ -13,6 +13,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////
 #define DEBUG 1
+#define LOG_EFFECT 0 // Set to 1 to see effect names as they're called. It's going to slow things down though...
 
 #define LED_PIN         5
 #define NUM_LEDS        50
@@ -24,6 +25,8 @@ CRGB currentColor = CRGB::White;
 #define MAX_CURRENT_EFFECT_LENGTH   64
 char currentEffect[MAX_CURRENT_EFFECT_LENGTH] = "none";
 uint8_t brightness = 50;
+uint8_t effectHue = 0; // rotating base color used by effects
+void (*currentEffectFunc)(void) = NULL;
 
 // Stuff for ZeroConf/Bonjour
 bool bHostDomainConfirmed = false;
@@ -79,6 +82,7 @@ void setup() {
     loadCurrentColor();
     loadBrightness();
     loadEffect();
+    setEffectFuncPtr();
 
     FastLED.addLeds<WS2812,LED_PIN,GRB>(leds, NUM_LEDS);
     FastLED.setMaxPowerInVoltsAndMilliamps(5, 10000);
@@ -174,6 +178,15 @@ void mem_effect(bool saving) {
     }
 }
 
+void updateEffects() {
+    EVERY_N_MILLISECONDS(20) {
+        effectHue++;
+    }
+    if (currentEffectFunc != NULL) {
+        (*currentEffectFunc)();
+    }
+}
+
 void loop() {
     MDNS.update();
     
@@ -181,7 +194,7 @@ void loop() {
     if (client) {
         Serial.println("[client connected]");
         while (client.connected()) {
-            runEffects();
+            updateEffects();
             if (client.available()) {
                 String cLine = client.readStringUntil('\r');
                 cLine.trim();
@@ -211,18 +224,21 @@ void loop() {
     }
 
     // If no client is connected, we're just handling the lights.
-    runEffects();
+    updateEffects();
     
     delay(50);
 }
 
-void runEffects() {
-    if (strcmp(currentEffect, "none") != 0) {
-        if (strcmp(currentEffect, "trails") == 0) { trails(); }
-        else if (strcmp(currentEffect, "somethingElse") == 0) {
-            
-        }
-    }
+void setEffectFuncPtr() {
+    if (strcmp(currentEffect, "none") == 0)                 { currentEffectFunc = NULL; }
+    else if (strcmp(currentEffect, "trails") == 0)          { currentEffectFunc = &trails; }
+    else if (strcmp(currentEffect, "rainbow") == 0)         { currentEffectFunc = &rainbow; } 
+    else if (strcmp(currentEffect, "rainbowGlitter") == 0)  { currentEffectFunc = &rainbowWithGlitter; } 
+    else if (strcmp(currentEffect, "confetti") == 0)        { currentEffectFunc = &confetti; } 
+    else if (strcmp(currentEffect, "sinelon") == 0)         { currentEffectFunc = &sinelon; } 
+    else if (strcmp(currentEffect, "bpm") == 0)             { currentEffectFunc = &bpm; } 
+    else if (strcmp(currentEffect, "juggle") == 0)          { currentEffectFunc = &juggle; }
+    else { Serial.printf("Unknown effect [%s] in setEffectFuncPtr\n", currentEffect); }
 }
 
 #define SET_OK  sprintf(r->msg, "ok")
@@ -258,6 +274,7 @@ CmdResults *commandProcessor(String cmd) {
         bzero(currentEffect, MAX_CURRENT_EFFECT_LENGTH);
         sprintf(currentEffect, effectName.c_str());
         storeEffect();
+        setEffectFuncPtr();
         SET_OK;        
     }
     else if (cmd.startsWith("brightness:")) {
@@ -288,17 +305,27 @@ CmdResults *commandProcessor(String cmd) {
     return r;
 }
 
+//
+// Effects
+//
+///////////////////////////////////////////////////////////////////////////
 void fadeall() { 
     for(int i = 0; i < NUM_LEDS; i++) { leds[i].nscale8(250); } 
 }
 
+void __logEffect(const char *funcName) {
+#if LOG_EFFECT
+    Serial.printf("%s\n", funcName);
+#endif
+    
+}
+
 void trails() {
-    Serial.println("trails");
-    static uint8_t hue = 0;
+    __logEffect(__func__);
     // First slide the led in one direction
     for(int i = 0; i < NUM_LEDS; i++) {
         // Set the i'th led to red 
-        leds[i] = CHSV(hue++, 255, 255);
+        leds[i] = CHSV(effectHue, 255, 255);
         // Show the leds
         FastLED.show(); 
         // now that we've shown the leds, reset the i'th led to black
@@ -311,7 +338,7 @@ void trails() {
     // Now go in the other direction.  
     for(int i = (NUM_LEDS)-1; i >= 0; i--) {
         // Set the i'th led to red 
-        leds[i] = CHSV(hue++, 255, 255);
+        leds[i] = CHSV(effectHue, 255, 255);
         // Show the leds
         FastLED.show();
         // now that we've shown the leds, reset the i'th led to black
@@ -322,9 +349,66 @@ void trails() {
     }
 }
 
+void rainbow() {
+    __logEffect(__func__);
+    fill_rainbow(leds, NUM_LEDS, effectHue, 7);
+}
+
+void rainbowWithGlitter() {
+    __logEffect(__func__);
+    rainbow();
+    _addGlitter(80);
+}
+
+void _addGlitter(fract8 chanceOfGlitter) {
+    if( random8() < chanceOfGlitter) {
+        leds[ random16(NUM_LEDS) ] += CRGB::White;
+    }
+}
+
+void confetti() {
+    __logEffect(__func__);
+    // random colored speckles that blink in and fade smoothly
+    fadeToBlackBy(leds, NUM_LEDS, 10);
+    int pos = random16(NUM_LEDS);
+    leds[pos] += CHSV(effectHue + random8(64), 200, 255);
+}
+
+void sinelon() {
+    __logEffect(__func__);
+    // a colored dot sweeping back and forth, with fading trails
+    fadeToBlackBy(leds, NUM_LEDS, 20);
+    int pos = beatsin16(13, 0, NUM_LEDS-1);
+    leds[pos] += CHSV(effectHue, 255, 192);
+}
+
+void bpm() {
+    __logEffect(__func__);
+    // colored stripes pulsing at a defined Beats-Per-Minute (BPM)
+    uint8_t BeatsPerMinute = 62;
+    CRGBPalette16 palette = PartyColors_p;
+    uint8_t beat = beatsin8(BeatsPerMinute, 64, 255);
+    for(int i=0; i<NUM_LEDS; i++) { //9948
+        leds[i] = ColorFromPalette(palette, effectHue+(i*2), beat-effectHue+(i*10));
+    }
+}
+
+void juggle() {
+    __logEffect(__func__);
+    // eight colored dots, weaving in and out of sync with each other
+    fadeToBlackBy(leds, NUM_LEDS, 20);
+    byte dothue = 0;
+    for(int i=0; i<8; i++) {
+        leds[beatsin16(i+7, 0, NUM_LEDS-1 )] |= CHSV(dothue, 200, 255);
+        dothue += 32;
+    }
+}
+
+
 //
 // ZeroConf/Bonjour things
 //
+///////////////////////////////////////////////////////////////////////////
 void serviceProbeResult(String p_pcServiceName, const MDNSResponder::hMDNSService p_hMDNSService, bool p_bProbeResult) {
     (void) p_hMDNSService;
     Serial.printf("MDNSServiceProbeResultCallback: Service '%s' probe %s\n", p_pcServiceName.c_str(), (p_bProbeResult ? "succeeded." : "failed!"));
