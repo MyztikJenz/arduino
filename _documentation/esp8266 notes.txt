@@ -38,6 +38,18 @@ use the FTDI programmer for this, not an Arduino. Too much a pain in the ass to 
 
 if all went well, AT+GMR should show the "good" firmware noted below.
 
+### Instructions for installing an ESP8266 Arduino core ###
+https://github.com/esp8266/Arduino
+
+1) add the board manager URL
+2) Install the ESP8266 boards
+3) Choose Generic ESP8266 Board
+4) You'll need to include ESP8266Wifi.h
+
+Docs at: https://arduino-esp8266.readthedocs.io/en/2.7.1/
+
+###########################################################
+
 
 ### To get a printout of the chip's details, pull RST low then back to high. It'll print out a bunch of stuff like (assuming you have a monitor on the port). The same can be done with AT+RST:
 
@@ -128,6 +140,8 @@ Dual-IO, Quad-IO
 AT+UART_DEF=9600,8,1,0,0
 
 • Good vs Bad firmware
+Command: AT+GMR
+
 Bad
 AT version:1.2.0.0(Jul  1 2016 20:04:45)
 SDK version:1.5.4.1(39cb9a32)
