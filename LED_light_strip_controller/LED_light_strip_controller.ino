@@ -1,9 +1,17 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <FastLED.h>
+#include <EEPROM.h>
 #include "wifi_credentials.h"
 #include "color_remote.h"
 
+// 
+// LED Light Strip controller doodad
+//
+// A Note: EEPROM management for ESP devices is different than just normal Arduino. There's begin/commit/end and it appears 
+//         that they blit the entire size given to begin() each time commit() is called. It's a bit weird.
+//
+////////////////////////////////////////////////////////////////////////////////////////////////
 #define DEBUG 1
 
 #define LED_PIN         5
@@ -12,7 +20,10 @@
 
 WiFiServer server(SERVICE_PORT);
 CRGB leds[NUM_LEDS];
-CRGB currentColor = CRGB::Black;
+CRGB currentColor = CRGB::White;
+#define MAX_CURRENT_EFFECT_LENGTH   64
+char currentEffect[MAX_CURRENT_EFFECT_LENGTH] = "none";
+uint8_t brightness = 50;
 
 // Stuff for ZeroConf/Bonjour
 bool bHostDomainConfirmed = false;
@@ -21,7 +32,10 @@ MDNSResponder::hMDNSService hMDNSService = NULL;
 MDNSResponder::hMDNSServiceQuery hMDNSServiceQuery = NULL;
 const char *serviceIdent = "ledicious";
 
-uint8_t brightness = 44;
+// EEPROM addresses
+int addr_savedColor      = 0;   // 3 bytes
+int addr_savedBrightness = 3;   // 1 byte
+int addr_savedEffect     = 4;   // MAX_CURRENT_EFFECT_LENGTH bytes (64)
 
 #define MAX_MSG_SIZE 256
 typedef struct t_results {
@@ -34,6 +48,7 @@ void setup() {
     Serial.begin(9600);
     delay(100);
     Serial.println(F("Well, hello there..."));
+    EEPROM.begin(1024);
 
     WiFi.begin(wifi_ssid, wifi_password);
     while (WiFi.status() != WL_CONNECTED) {
@@ -60,6 +75,11 @@ void setup() {
         Serial.println("mDNS should be working");
     }
 
+    // Load any values from memory
+    loadCurrentColor();
+    loadBrightness();
+    loadEffect();
+
     FastLED.addLeds<WS2812,LED_PIN,GRB>(leds, NUM_LEDS);
     FastLED.setMaxPowerInVoltsAndMilliamps(5, 10000);
     fill_solid(leds, NUM_LEDS, currentColor);
@@ -79,7 +99,80 @@ void logColor(CRGB c) {
     Serial.println(str);
 }
 
-char currentEffect[256] = "none";
+void loadCurrentColor() { mem_currentColor(false); }
+void storeCurrentColor() { mem_currentColor(true); }
+void mem_currentColor(bool saving) {
+    uint8_t r = EEPROM.read(addr_savedColor);
+    uint8_t g = EEPROM.read(addr_savedColor+1);
+    uint8_t b = EEPROM.read(addr_savedColor+2);
+
+    if (saving) {
+        bool commit = false;
+        if (r != currentColor.red)   { EEPROM.write(addr_savedColor, currentColor.red); commit = true; }
+        if (g != currentColor.green) { EEPROM.write(addr_savedColor+1, currentColor.green); commit = true; }
+        if (b != currentColor.blue)  { EEPROM.write(addr_savedColor+2, currentColor.blue); commit = true; }
+
+        if (commit) {
+            EEPROM.commit();
+        }
+
+//        uint8_t _r = EEPROM.read(addr_savedColor);
+//        uint8_t _g = EEPROM.read(addr_savedColor+1);
+//        uint8_t _b = EEPROM.read(addr_savedColor+2);
+//        Serial.printf("memcheck: Loaded 0x%02X%02X%02X from memory\n", _r, _g, _b);
+    }
+    else {
+#if DEBUG
+        Serial.printf("Loaded 0x%02X%02X%02X from memory\n", r, g, b);
+#endif
+        currentColor = CRGB(r, g, b);
+    }
+}
+
+void loadBrightness() { mem_brightness(false); }
+void storeBrightness() { mem_brightness(true); }
+void mem_brightness(bool saving) {
+    uint8_t b = EEPROM.read(addr_savedBrightness);
+    if (saving) {
+        if (b != brightness) { 
+            EEPROM.write(addr_savedBrightness, brightness);
+            EEPROM.commit();
+        }
+
+//        uint8_t x = EEPROM.read(addr_savedBrightness);
+//        Serial.printf("memcheck brightness: %hhu\n", x);
+    }
+    else {
+#if DEBUG
+        Serial.printf("Loaded brightness %hhu from memory\n", b);
+#endif
+        brightness = b;
+    }
+}
+
+void loadEffect() { mem_effect(false); }
+void storeEffect() { mem_effect(true); }
+void mem_effect(bool saving) {
+    char e[MAX_CURRENT_EFFECT_LENGTH];
+    bzero(e, MAX_CURRENT_EFFECT_LENGTH);
+    EEPROM.get(addr_savedEffect, e);
+    if (saving) {
+        if (strncmp(currentEffect, e, MAX_CURRENT_EFFECT_LENGTH) != 0) {
+            EEPROM.put(addr_savedEffect, currentEffect);
+            EEPROM.commit();
+        }
+
+//        bzero(e, MAX_CURRENT_EFFECT_LENGTH);
+//        EEPROM.get(addr_savedEffect, e);
+//        Serial.printf("memcheck effect name: [%s]\n", e);
+    }
+    else {
+#if DEBUG
+        Serial.printf("Loaded currentEffect %s from memory\n", e);
+#endif
+        strncpy(currentEffect, e, MAX_CURRENT_EFFECT_LENGTH);
+    }
+}
 
 void loop() {
     MDNS.update();
@@ -125,8 +218,8 @@ void loop() {
 
 void runEffects() {
     if (strcmp(currentEffect, "none") != 0) {
-        if (strcmp(currentEffect, "trails") != 0) { trails(); }
-        else if (strcmp(currentEffect, "somethingElse") != 0) {
+        if (strcmp(currentEffect, "trails") == 0) { trails(); }
+        else if (strcmp(currentEffect, "somethingElse") == 0) {
             
         }
     }
@@ -141,7 +234,7 @@ CmdResults *commandProcessor(String cmd) {
         r->code = 0;
     }
     else if (cmd == "currentConfig") {
-        sprintf(r->msg, "currentConfig:0x%02X%02X%02X|none|%hhu", currentColor.red, currentColor.green, currentColor.blue, brightness);
+        sprintf(r->msg, "currentConfig:0x%02X%02X%02X|%s|%hhu", currentColor.red, currentColor.green, currentColor.blue, currentEffect, brightness);
         r->code = 0;
     }
     else if (cmd == "") { // End the connection
@@ -154,6 +247,7 @@ CmdResults *commandProcessor(String cmd) {
         int n = (int)strtol(hexColor.c_str(), NULL, 16);
         currentColor = CRGB(n);
         logColor(currentColor);
+        storeCurrentColor();
         fill_solid(leds, NUM_LEDS, currentColor);
         FastLED.show();
     }
@@ -161,8 +255,9 @@ CmdResults *commandProcessor(String cmd) {
         r->code = 0;
         String effectName = cmd.substring(7);
         Serial.println(effectName);
-        bzero(currentEffect, 256);
+        bzero(currentEffect, MAX_CURRENT_EFFECT_LENGTH);
         sprintf(currentEffect, effectName.c_str());
+        storeEffect();
         SET_OK;        
     }
     else if (cmd.startsWith("brightness:")) {
@@ -175,9 +270,10 @@ CmdResults *commandProcessor(String cmd) {
         }
         else {
             String newBrightness = cmd.substring(11);
-            int n = (int)strtol(newBrightness.c_str(), NULL, 4);
+            int n = (int)strtol(newBrightness.c_str(), NULL, 10);
             brightness = (uint8_t)min(max(n, 0), 255);
         }
+        storeBrightness();
         FastLED.setBrightness(brightness);
         FastLED.show();
 

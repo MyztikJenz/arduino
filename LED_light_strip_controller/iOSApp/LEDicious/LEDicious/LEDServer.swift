@@ -51,6 +51,7 @@ struct LEDServerDetail: View {
             Spacer()
         }
         .onAppear {
+            NSLog("onAppear")
             conn?.startConnection()
         }
         .onDisappear {
