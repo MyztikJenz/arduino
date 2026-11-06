@@ -13,6 +13,11 @@ homekit_characteristic_t cha_brightness = HOMEKIT_CHARACTERISTIC_(BRIGHTNESS, 20
 homekit_characteristic_t cha_hue = HOMEKIT_CHARACTERISTIC_(HUE, 180);
 homekit_characteristic_t cha_saturation= HOMEKIT_CHARACTERISTIC_(SATURATION, 50);
 
+homekit_characteristic_t cha_rainbow_switch_on = HOMEKIT_CHARACTERISTIC_(ON, false);
+homekit_characteristic_t cha_rainbow_name = HOMEKIT_CHARACTERISTIC_(NAME, "Rainbow Effect");
+homekit_characteristic_t cha_rainbow_brightness = HOMEKIT_CHARACTERISTIC_(BRIGHTNESS, 20);
+
+
 homekit_accessory_t *accessories[] = {
     HOMEKIT_ACCESSORY(.id=1, .category=homekit_accessory_category_lightbulb, .services=(homekit_service_t*[]) {
         HOMEKIT_SERVICE(ACCESSORY_INFORMATION, .characteristics=(homekit_characteristic_t*[]) {
@@ -30,6 +35,24 @@ homekit_accessory_t *accessories[] = {
             &cha_hue,
             &cha_brightness,
             &cha_saturation,
+            NULL
+        }),
+        NULL
+    }),
+    HOMEKIT_ACCESSORY(.id=2, .category=homekit_accessory_category_lightbulb, .services=(homekit_service_t*[]) {
+        HOMEKIT_SERVICE(ACCESSORY_INFORMATION, .characteristics=(homekit_characteristic_t*[]) {
+            HOMEKIT_CHARACTERISTIC(NAME, "Rainbow Effect"),
+            HOMEKIT_CHARACTERISTIC(MANUFACTURER, "Jim!"),
+            HOMEKIT_CHARACTERISTIC(SERIAL_NUMBER, "Jenny-8675309"),
+            HOMEKIT_CHARACTERISTIC(MODEL, "ESP8266"),
+            HOMEKIT_CHARACTERISTIC(FIRMWARE_REVISION, "1.0"),
+            HOMEKIT_CHARACTERISTIC(IDENTIFY, my_accessory_identify),
+            NULL
+        }),
+        HOMEKIT_SERVICE(LIGHTBULB, .primary=true, .characteristics=(homekit_characteristic_t*[]){
+            &cha_rainbow_switch_on,
+            &cha_rainbow_name,
+            &cha_rainbow_brightness,
             NULL
         }),
         NULL

@@ -18,6 +18,7 @@
 
 #define LED_PIN         5
 #define POWER_RELAY_PIN 14
+#define PAIR_MODE_PIN   16
 #define NUM_LEDS        10
 #define SERVICE_PORT    1234
 
@@ -51,7 +52,10 @@ extern "C" homekit_characteristic_t cha_switch_on;
 extern "C" homekit_characteristic_t cha_brightness;
 extern "C" homekit_characteristic_t cha_saturation;
 extern "C" homekit_characteristic_t cha_hue;
-#define RESET_HOMEKIT           0   // Set to 1 and launch to remove all HomeKit pairing info
+
+extern "C" homekit_characteristic_t cha_rainbow_switch_on;
+extern "C" homekit_characteristic_t cha_rainbow_brightness;
+static bool inPairingMode = false;  // Hold the pairing button during restart to enter pairing mode (deletes existing pairs, overclocks CPU)
 #define REPORT_HOMEKIT_USAGE    0   // Set to 1 to see periodic HomeKit stats
 
 // The message that's returned from Command processing when connected via the App
@@ -70,6 +74,10 @@ void setup() {
     pinMode(POWER_RELAY_PIN, OUTPUT);
     digitalWrite(POWER_RELAY_PIN, LOW);
     cha_switch_on.value.bool_value = false;
+
+    pinMode(PAIR_MODE_PIN, INPUT_PULLUP);
+    
+    inPairingMode = (digitalRead(PAIR_MODE_PIN) == HIGH);
     
     EEPROM.begin(1024);
 
@@ -357,26 +365,32 @@ void my_homekit_loop() {
 }
 
 void my_homekit_setup() {
-#if RESET_HOMEKIT
-    homekit_storage_reset();
-#endif
+    if (inPairingMode) {
+        Serial.println("### Restting HomeKit Storage ###");
+        homekit_storage_reset();
+    }
+
     cha_hue.setter = cha_hue_setter;
     cha_switch_on.setter = cha_switch_on_setter;
     cha_brightness.setter = cha_brightness_setter;
     cha_saturation.setter = cha_saturation_setter;
 
+    cha_rainbow_switch_on.setter = cha_rainbow_switch_on_setter;
+    cha_rainbow_brightness.setter = cha_rainbow_brightness_setter;
+
     // Set the HomeKit Characteristics to their defaults as restored from memory. HomeKit uses this to update it's UI.
     cha_brightness.value.int_value = (brightness * 100 / 255);
     cha_saturation.value.float_value = (float)(currentHSVColor.saturation * 100.0 / 255.0);
     cha_hue.value.int_value = (uint8_t)(currentHSVColor.hue * 360.0 / 255.0);
-    Serial.printf("cha_hue.value.int_value: %hhu [%hhu]\n", cha_hue.value.int_value, (currentHSVColor.hue * 360 / 255));
 
     arduino_homekit_setup(&homekit_config);
 
     // Finally figured out why the LEDs were just not working right. `arduino_homekit_setup` sets the clock speed to 160Mhz and
     // that messes everything up. Resetting back to 80Mhz gets everyone working again (although the HomeKit routines do appear
     // much slower now).
-    system_update_cpu_freq(SYS_CPU_80MHZ);
+    if (!inPairingMode) {
+        system_update_cpu_freq(SYS_CPU_80MHZ);
+    }
 }
 
 void cha_switch_on_setter(const homekit_value_t value) {
@@ -385,6 +399,12 @@ void cha_switch_on_setter(const homekit_value_t value) {
 #if DEBUG
     Serial.printf("Switch: %s\n", onValue ? "ON" : "OFF");
 #endif
+
+    // If an effect is enabled, turn it off
+    if (strcmp(currentEffect, "none") != 0) {
+        strncpy(currentEffect, "none", MAX_CURRENT_EFFECT_LENGTH);
+    }
+
     digitalWrite(POWER_RELAY_PIN, onValue ? HIGH : LOW);
 }
 
@@ -451,6 +471,27 @@ void cha_hue_setter(const homekit_value_t value) {
     _colorSetter();
 }
 
+
+// Effects test
+void cha_rainbow_switch_on_setter(const homekit_value_t value) {
+    bool onValue = value.bool_value;
+    cha_rainbow_switch_on.value.bool_value = onValue;
+    digitalWrite(POWER_RELAY_PIN, onValue ? HIGH : LOW);
+
+    strncpy(currentEffect, onValue ? "rainbow" : "none", MAX_CURRENT_EFFECT_LENGTH);
+    setEffectFuncPtr();
+}
+
+// Brightness is 0-100
+void cha_rainbow_brightness_setter(const homekit_value_t value) {
+    int b = value.int_value;
+
+    cha_rainbow_brightness.value.int_value = b;
+    uint8_t effectBrightness = (uint8_t)ceilf(b * 255.0 / 100.0);
+    FastLED.setBrightness(effectBrightness);
+}
+
+
 //
 // Effects
 //
@@ -499,6 +540,7 @@ void trails() {
 void rainbow() {
     __logEffect(__func__);
     fill_rainbow(leds, NUM_LEDS, effectHue, 7);
+    FastLED.show();
 }
 
 void rainbowWithGlitter() {
