@@ -1,0 +1,38 @@
+// At the start
+RAM:   [==========]  144.9% (used 742 bytes from 512 bytes)
+Flash: [========= ]  88.2% (used 7224 bytes from 8192 bytes)
+
+// u8g2 optimizations
+RAM:   [==========]  144.9% (used 742 bytes from 512 bytes)
+Flash: [========  ]  79.1% (used 6478 bytes from 8192 bytes)
+
+// Moved art to PROGMEM
+RAM:   [==========]  128.5% (used 658 bytes from 512 bytes)
+Flash: [========  ]  79.0% (used 6470 bytes from 8192 bytes)
+
+// Full-frame in memory to single buffer
+RAM:   [=====     ]  53.5% (used 274 bytes from 512 bytes)
+Flash: [========  ]  79.0% (used 6470 bytes from 8192 bytes)
+
+
+
+
+
+
+
+// Alternative LDC library
+https://arduino.stackexchange.com/questions/29546/attiny85-i2c-lcd
+https://www.instructables.com/Using-an-I2C-LCD-on-Attiny85/
+
+// Getting VSCode to debug the board
+https://community.platformio.org/t/attiny-85-programming-as-isp-via-usb-how-to/9262/2
+
+// Fuse settings
+http://eleccelerator.com/fusecalc/fusecalc.php?chip=attiny85
+
+// RAM optimizations for u8g2
+https://github.com/olikraus/u8g2/wiki/u8g2optimization
+https://create.arduino.cc/projecthub/john-bradnam/reducing-your-memory-usage-26ca05
+
+
+
