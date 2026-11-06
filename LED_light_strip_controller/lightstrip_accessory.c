@@ -22,6 +22,25 @@ homekit_characteristic_t cha_rainbow_switch_on = HOMEKIT_CHARACTERISTIC_(ON, fal
 homekit_characteristic_t cha_rainbow_name = HOMEKIT_CHARACTERISTIC_(NAME, "_rainbow_");
 homekit_characteristic_t cha_rainbow_brightness = HOMEKIT_CHARACTERISTIC_(BRIGHTNESS, 20);
 
+homekit_characteristic_t cha_rainbow_glitter_switch_on = HOMEKIT_CHARACTERISTIC_(ON, false);
+homekit_characteristic_t cha_rainbow_glitter_name = HOMEKIT_CHARACTERISTIC_(NAME, "_rainbowglitter_");
+homekit_characteristic_t cha_rainbow_glitter_brightness = HOMEKIT_CHARACTERISTIC_(BRIGHTNESS, 20);
+
+homekit_characteristic_t cha_confetti_switch_on = HOMEKIT_CHARACTERISTIC_(ON, false);
+homekit_characteristic_t cha_confetti_name = HOMEKIT_CHARACTERISTIC_(NAME, "_confetti_");
+homekit_characteristic_t cha_confetti_brightness = HOMEKIT_CHARACTERISTIC_(BRIGHTNESS, 20);
+
+homekit_characteristic_t cha_sinelon_switch_on = HOMEKIT_CHARACTERISTIC_(ON, false);
+homekit_characteristic_t cha_sinelon_name = HOMEKIT_CHARACTERISTIC_(NAME, "_sinelon_");
+homekit_characteristic_t cha_sinelon_brightness = HOMEKIT_CHARACTERISTIC_(BRIGHTNESS, 20);
+
+homekit_characteristic_t cha_bpm_switch_on = HOMEKIT_CHARACTERISTIC_(ON, false);
+homekit_characteristic_t cha_bpm_name = HOMEKIT_CHARACTERISTIC_(NAME, "_bpm_");
+homekit_characteristic_t cha_bpm_brightness = HOMEKIT_CHARACTERISTIC_(BRIGHTNESS, 20);
+
+homekit_characteristic_t cha_juggle_switch_on = HOMEKIT_CHARACTERISTIC_(ON, false);
+homekit_characteristic_t cha_juggle_name = HOMEKIT_CHARACTERISTIC_(NAME, "_juggle_");
+homekit_characteristic_t cha_juggle_brightness = HOMEKIT_CHARACTERISTIC_(BRIGHTNESS, 20);
 
 homekit_accessory_t *accessories[] = {
     HOMEKIT_ACCESSORY(.id=1, .category=homekit_accessory_category_lightbulb, .services=(homekit_service_t*[]) {
@@ -52,6 +71,36 @@ homekit_accessory_t *accessories[] = {
             &cha_rainbow_switch_on,
             &cha_rainbow_name,
             &cha_rainbow_brightness,
+            NULL
+        }),
+        HOMEKIT_SERVICE(LIGHTBULB, .primary=false, .characteristics=(homekit_characteristic_t*[]){
+            &cha_rainbow_glitter_switch_on,
+            &cha_rainbow_glitter_name,
+            &cha_rainbow_glitter_brightness,
+            NULL
+        }),
+        HOMEKIT_SERVICE(LIGHTBULB, .primary=false, .characteristics=(homekit_characteristic_t*[]){
+            &cha_confetti_switch_on,
+            &cha_confetti_name,
+            &cha_confetti_brightness,
+            NULL
+        }),
+        HOMEKIT_SERVICE(LIGHTBULB, .primary=false, .characteristics=(homekit_characteristic_t*[]){
+            &cha_sinelon_switch_on,
+            &cha_sinelon_name,
+            &cha_sinelon_brightness,
+            NULL
+        }),
+        HOMEKIT_SERVICE(LIGHTBULB, .primary=false, .characteristics=(homekit_characteristic_t*[]){
+            &cha_bpm_switch_on,
+            &cha_bpm_name,
+            &cha_bpm_brightness,
+            NULL
+        }),
+        HOMEKIT_SERVICE(LIGHTBULB, .primary=false, .characteristics=(homekit_characteristic_t*[]){
+            &cha_juggle_switch_on,
+            &cha_juggle_name,
+            &cha_juggle_brightness,
             NULL
         }),
         NULL

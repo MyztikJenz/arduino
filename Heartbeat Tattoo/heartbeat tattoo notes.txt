@@ -1,0 +1,18 @@
+Super tiny LEDs
+https://www.adafruit.com/product/4368
+https://www.adafruit.com/product/1655
+
+Diffusion tape
+https://www.amazon.com/dp/B0BMXFNSVW?ref_=cm_sw_r_cp_ud_dp_N13BJZZZJNE6AJYPGAW5
+
+TZT Ecg module AD8232
+https://www.sparkfun.com/products/12650
+
+Einthoven's triangle
+https://thephysiologist.org/study-materials/the-ecg-leads-polarity-and-einthovens-triangle/
+Sorta working
+    Green on bottom
+    Yellow left
+    Red right
+    
+    ^^^ this is actually correct

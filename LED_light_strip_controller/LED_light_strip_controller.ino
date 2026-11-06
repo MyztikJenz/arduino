@@ -14,6 +14,14 @@
 //
 // A Note: EEPROM management for ESP devices is different than just normal Arduino. There's begin/commit/end and it appears 
 //         that they blit the entire size given to begin() each time commit() is called. It's a bit weird.
+// 
+// Settings: Board: LOLIN(WEMOS) D1 R2 & mini
+//           CPU Frequency: 160 MHz
+//           IwIP Variant: v2 Lower Memory
+//           SSL Support: Basic SSL ciphers
+//           Debug Level: None
+//
+// HomeKit ESP8266 deets: https://github.com/Mixiaoxiao/Arduino-HomeKit-ESP8266
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////
 #define _DEBUG_ 1
@@ -22,7 +30,7 @@
 #define LED_PIN         5
 #define POWER_RELAY_PIN 14
 #define PAIR_MODE_PIN   16
-#define NUM_LEDS        50
+#define NUM_LEDS        240
 
 #define RUN_WEB_SERVER  0
 #if RUN_WEB_SERVER
@@ -99,6 +107,26 @@ extern "C" homekit_characteristic_t cha_trails_name;
 extern "C" homekit_characteristic_t cha_rainbow_switch_on;
 extern "C" homekit_characteristic_t cha_rainbow_brightness;
 extern "C" homekit_characteristic_t cha_rainbow_name;
+
+extern "C" homekit_characteristic_t cha_rainbow_glitter_switch_on;
+extern "C" homekit_characteristic_t cha_rainbow_glitter_brightness;
+extern "C" homekit_characteristic_t cha_rainbow_glitter_name;
+
+extern "C" homekit_characteristic_t cha_confetti_switch_on;
+extern "C" homekit_characteristic_t cha_confetti_brightness;
+extern "C" homekit_characteristic_t cha_confetti_name;
+
+extern "C" homekit_characteristic_t cha_sinelon_switch_on;
+extern "C" homekit_characteristic_t cha_sinelon_brightness;
+extern "C" homekit_characteristic_t cha_sinelon_name;
+
+extern "C" homekit_characteristic_t cha_bpm_switch_on;
+extern "C" homekit_characteristic_t cha_bpm_brightness;
+extern "C" homekit_characteristic_t cha_bpm_name;
+
+extern "C" homekit_characteristic_t cha_juggle_switch_on;
+extern "C" homekit_characteristic_t cha_juggle_brightness;
+extern "C" homekit_characteristic_t cha_juggle_name;
 
 static bool inPairingMode = false;  // Hold the pairing button during restart to enter pairing mode (deletes existing pairs, overclocks CPU)
 #define REPORT_HOMEKIT_USAGE    0   // Set to 1 to see periodic HomeKit stats
@@ -442,7 +470,7 @@ void my_homekit_setup() {
     cha_switch_on.setter_ex = common_effect_switch_on_setter;
     cha_hue.setter = cha_hue_setter;
     cha_saturation.setter = cha_saturation_setter;
-    cha_brightness.setter = cha_brightness_setter;
+    cha_brightness.setter_ex = common_brightness_setter;
 
     // Set the HomeKit Characteristics to their defaults as restored from memory. HomeKit uses this to update it's UI.
     cha_hue.value.int_value = (uint8_t)(currentHSVColor.hue * 360.0 / 255.0);
@@ -451,15 +479,39 @@ void my_homekit_setup() {
 
     // Now set up each effect's switch
     cha_trails_switch_on.setter_ex = common_effect_switch_on_setter;
-    cha_trails_brightness.setter_ex = cha_rainbow_brightness_setter;
+    cha_trails_brightness.setter_ex = common_brightness_setter;
     cha_trails_brightness.value.int_value = (fetchBrightness(trails) * 100 / 255);
     cha_trails_name.value.string_value = strdup(effectNames[trails]);
     
     cha_rainbow_switch_on.setter_ex = common_effect_switch_on_setter;
-    cha_rainbow_brightness.setter_ex = cha_rainbow_brightness_setter;
+    cha_rainbow_brightness.setter_ex = common_brightness_setter;
     cha_rainbow_brightness.value.int_value = (fetchBrightness(rainbow) * 100 / 255);
     cha_rainbow_name.value.string_value = strdup(effectNames[rainbow]);
 
+    cha_rainbow_glitter_switch_on.setter_ex = common_effect_switch_on_setter;
+    cha_rainbow_glitter_brightness.setter_ex = common_brightness_setter;
+    cha_rainbow_glitter_brightness.value.int_value = (fetchBrightness(rainbowGlitter) * 100 / 255);
+    cha_rainbow_glitter_name.value.string_value = strdup(effectNames[rainbowGlitter]);
+
+    cha_confetti_switch_on.setter_ex = common_effect_switch_on_setter;
+    cha_confetti_brightness.setter_ex = common_brightness_setter;
+    cha_confetti_brightness.value.int_value = (fetchBrightness(confetti) * 100 / 255);
+    cha_confetti_name.value.string_value = strdup(effectNames[confetti]);
+
+    cha_sinelon_switch_on.setter_ex = common_effect_switch_on_setter;
+    cha_sinelon_brightness.setter_ex = common_brightness_setter;
+    cha_sinelon_brightness.value.int_value = (fetchBrightness(sinelon) * 100 / 255);
+    cha_sinelon_name.value.string_value = strdup(effectNames[sinelon]);
+
+    cha_bpm_switch_on.setter_ex = common_effect_switch_on_setter;
+    cha_bpm_brightness.setter_ex = common_brightness_setter;
+    cha_bpm_brightness.value.int_value = (fetchBrightness(bpm) * 100 / 255);
+    cha_bpm_name.value.string_value = strdup(effectNames[bpm]);
+
+    cha_juggle_switch_on.setter_ex = common_effect_switch_on_setter;
+    cha_juggle_brightness.setter_ex = common_brightness_setter;
+    cha_juggle_brightness.value.int_value = (fetchBrightness(juggle) * 100 / 255);
+    cha_juggle_name.value.string_value = strdup(effectNames[juggle]);
 
     arduino_homekit_setup(&homekit_config);
 
@@ -621,41 +673,54 @@ void common_effect_switch_on_setter(homekit_characteristic_t *ch, const homekit_
     }
 }
 
-
-// Effects test
-void cha_rainbow_switch_on_setter(homekit_characteristic_t *ch, const homekit_value_t value) {
-    
-    bool onValue = value.bool_value;
-    cha_rainbow_switch_on.value.bool_value = onValue;
-    digitalWrite(POWER_RELAY_PIN, onValue ? HIGH : LOW);
-
-    currentEffect = onValue ? rainbow : none;
-    storeEffect();
-    setEffectFuncPtr();
-    // Any time an effect gets turned off, we need to refill the current color otherwise the lights will be stuck on whatever was last shown.
-    if (!onValue) {
-        fill_solid(leds, NUM_LEDS, currentHSVColor);
+void common_brightness_setter(homekit_characteristic_t *ch, const homekit_value_t value) {
+    Effect e = _effectForCharacteristic(ch);
+    if (e < totalNumberOfEffects) {
+        int b = value.int_value;
+        ch->value.int_value = b;
+        uint8_t effectBrightness = (uint8_t)ceilf(b * 255.0 / 100.0);
+        storeBrightness(e, effectBrightness);
+        if (e == none) {
+            currentHSVColor.value = effectBrightness;
+        }
+        FastLED.setBrightness(effectBrightness);
     }
 }
 
-// Brightness is 0-100
-void cha_rainbow_brightness_setter(homekit_characteristic_t *ch, const homekit_value_t value) {
-    int b = value.int_value;
-//    Serial.printf("cha_rainbow_brightness_setter: %d\n", b);
-//    Serial.printf("id: %d type: %s\n", ch->service->id, ch->service->type);
-
-//    for (homekit_characteristic_t **ptr=ch->service->characteristics; *ptr ; ++ptr) {
-//        if ((*ptr)->type == HOMEKIT_CHARACTERISTIC_NAME) {
-//            Serial.printf("Found something: %s\n", (*ptr)->value.string_value);
-//            break;
-//        }
+// Effects test
+//void cha_rainbow_switch_on_setter(homekit_characteristic_t *ch, const homekit_value_t value) {
+//    
+//    bool onValue = value.bool_value;
+//    cha_rainbow_switch_on.value.bool_value = onValue;
+//    digitalWrite(POWER_RELAY_PIN, onValue ? HIGH : LOW);
+//
+//    currentEffect = onValue ? rainbow : none;
+//    storeEffect();
+//    setEffectFuncPtr();
+//    // Any time an effect gets turned off, we need to refill the current color otherwise the lights will be stuck on whatever was last shown.
+//    if (!onValue) {
+//        fill_solid(leds, NUM_LEDS, currentHSVColor);
 //    }
-
-    cha_rainbow_brightness.value.int_value = b;
-    uint8_t effectBrightness = (uint8_t)ceilf(b * 255.0 / 100.0);
-    storeBrightness(currentEffect, effectBrightness);
-    FastLED.setBrightness(effectBrightness);
-}
+//}
+//
+//// Brightness is 0-100
+//void cha_rainbow_brightness_setter(homekit_characteristic_t *ch, const homekit_value_t value) {
+//    int b = value.int_value;
+////    Serial.printf("cha_rainbow_brightness_setter: %d\n", b);
+////    Serial.printf("id: %d type: %s\n", ch->service->id, ch->service->type);
+//
+////    for (homekit_characteristic_t **ptr=ch->service->characteristics; *ptr ; ++ptr) {
+////        if ((*ptr)->type == HOMEKIT_CHARACTERISTIC_NAME) {
+////            Serial.printf("Found something: %s\n", (*ptr)->value.string_value);
+////            break;
+////        }
+////    }
+//
+//    cha_rainbow_brightness.value.int_value = b;
+//    uint8_t effectBrightness = (uint8_t)ceilf(b * 255.0 / 100.0);
+//    storeBrightness(currentEffect, effectBrightness);
+//    FastLED.setBrightness(effectBrightness);
+//}
 
 
 //
@@ -712,6 +777,7 @@ void f_rainbowWithGlitter() {
     __logEffect;
     f_rainbow();
     _addGlitter(80);
+    FastLED.show();
 }
 
 void _addGlitter(fract8 chanceOfGlitter) {
@@ -726,25 +792,28 @@ void f_confetti() {
     fadeToBlackBy(leds, NUM_LEDS, 10);
     int pos = random16(NUM_LEDS);
     leds[pos] += CHSV(effectHue + random8(64), 200, 255);
+    FastLED.show();
 }
 
 void f_sinelon() {
     __logEffect;
     // a colored dot sweeping back and forth, with fading trails
     fadeToBlackBy(leds, NUM_LEDS, 20);
-    int pos = beatsin16(13, 0, NUM_LEDS-1);
+    int pos = beatsin8(13, 0, NUM_LEDS-1);
     leds[pos] += CHSV(effectHue, 255, 192);
+    FastLED.show();
 }
 
 void f_bpm() {
     __logEffect;
     // colored stripes pulsing at a defined Beats-Per-Minute (BPM)
-    uint8_t BeatsPerMinute = 62;
+    uint8_t BeatsPerMinute = 88;
     CRGBPalette16 palette = PartyColors_p;
     uint8_t beat = beatsin8(BeatsPerMinute, 64, 255);
-    for(int i=0; i<NUM_LEDS; i++) { //9948
+    for(int i=0; i<NUM_LEDS; i++) {
         leds[i] = ColorFromPalette(palette, effectHue+(i*2), beat-effectHue+(i*10));
     }
+    FastLED.show();
 }
 
 void f_juggle() {
@@ -756,6 +825,7 @@ void f_juggle() {
         leds[beatsin16(i+7, 0, NUM_LEDS-1 )] |= CHSV(dothue, 200, 255);
         dothue += 32;
     }
+    FastLED.show();
 }
 
 

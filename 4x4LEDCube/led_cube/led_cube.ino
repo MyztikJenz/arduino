@@ -1,8 +1,8 @@
-const int buttonPin = 7;
-
-const int clockPin = 8;
-const int latchPin = 9;
-const int outputPin = 11;
+// Colors are the wires on the perfboard setup
+const int buttonPin = 9;    // white
+const int clockPin = 10;    // yellow
+const int latchPin = 11;    // blue
+const int outputPin = 12;   // green
 
 const int debugLevel = 0;
 
@@ -26,6 +26,8 @@ void setup() {
     pinMode(latchPin, OUTPUT);
     pinMode(outputPin, OUTPUT);
     pinMode(clockPin, OUTPUT);
+
+    pinMode(LED_BUILTIN, OUTPUT);
 
 //    uint8_t layer = B00001110; // Only the first four bits matter
 //    uint16_t values = (B10000000 << 8) + (B11110000); 
@@ -54,7 +56,16 @@ void setup() {
 #define PATTERN_test        2
 #define MAX_PATTERNS        2
 
-uint8_t currentEffect = PATTERN_boxThrob;
+typedef enum t_effects {
+    boxThrob = 0,
+    layerCycle,
+    chaserEffect,
+    allOnThenOff,
+
+    totalNumberOfEffects
+} Effect;
+
+Effect currentEffect = layerCycle;
 
 int lastButtonPressed = HIGH;
 void loop() {
@@ -68,8 +79,10 @@ void loop() {
     }
 
     switch(currentEffect) {
-        case PATTERN_boxThrob: throbCube(); break;
-        case PATTERN_layerCycle: cycleLightLayers(); break;
+        case boxThrob: throbCube(); break;
+        case layerCycle: cycleLightLayers(); break;
+        case chaserEffect: chaser(); break;
+        case allOnThenOff: allOnOffEffect(); break;
 //        case PATTERN_test: testPattern(); break;
 
         default: throbCube();
@@ -77,6 +90,28 @@ void loop() {
     }
     
     renderCube();
+}
+
+void chaser() {
+    testPattern();
+}
+
+bool allOn = true;
+void allOnOffEffect() {
+    if (allOn) {
+        allOn = false;
+//        for (uint8_t layer=0; layer<NUM_LEDS; layer++) {
+//            lightLayer(layer, false);
+//        }
+        digitalWrite(LED_BUILTIN, HIGH);
+        lightEntireCube(2);
+    }
+    else {
+        allOn = true;
+        clearCube();
+        digitalWrite(LED_BUILTIN, LOW);
+        delay(2000);
+    }
 }
 
 uint8_t currentLayer = 0;
@@ -174,8 +209,8 @@ void drawCube(uint8_t x, uint8_t y, uint8_t z, uint8_t s) {
 }
 
 void clearCube() {
-    for (uint8_t layer=0; layer<4; layer++) {
-        for (uint8_t row=0; row<4; row++) {
+    for (uint8_t layer=0; layer<NUM_LEDS; layer++) {
+        for (uint8_t row=0; row<NUM_LEDS; row++) {
             cube[layer][row] = 0x0;
         }
     }
@@ -216,7 +251,24 @@ void testPattern() {
             currentLayer = (currentLayer + 1) % 4;
         }
 
-        delay(500);
+        delay(100);
+    }
+}
+
+void lightEntireCube(int holdForSeconds) {
+    uint8_t currentLayer = 0;
+    uint16_t currentLED  = 0;
+    unsigned long startTime = millis();
+    unsigned long endTime = startTime;
+    unsigned long msToHold = 1000 * holdForSeconds;
+
+    while ((endTime - startTime) < msToHold) {
+        renderCubeAtLayer((1 << currentLayer), (1 << currentLED));
+        currentLED = (currentLED + 1) % 16;
+        if (currentLED == 0) {
+            currentLayer = (currentLayer + 1) % 4;
+        }
+        endTime = millis();
     }
 }
 
