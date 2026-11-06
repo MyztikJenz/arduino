@@ -19,7 +19,7 @@
 #define LED_PIN         5
 #define POWER_RELAY_PIN 14
 #define PAIR_MODE_PIN   16
-#define NUM_LEDS        10
+#define NUM_LEDS        50
 
 #define RUN_WEB_SERVER  0
 #if RUN_WEB_SERVER
@@ -129,7 +129,7 @@ void setup() {
     setEffectFuncPtr();
 
     FastLED.addLeds<WS2812,LED_PIN,GRB>(leds, NUM_LEDS);
-    FastLED.setMaxPowerInVoltsAndMilliamps(5, 1000);
+    FastLED.setMaxPowerInVoltsAndMilliamps(5, 10000);
     fill_solid(leds, NUM_LEDS, currentHSVColor);
     FastLED.setBrightness(brightness);
 
@@ -419,6 +419,8 @@ void cha_switch_on_setter(const homekit_value_t value) {
     // If an effect is enabled, turn it off
     if (strcmp(currentEffect, "none") != 0) {
         strncpy(currentEffect, "none", MAX_CURRENT_EFFECT_LENGTH);
+        storeEffect();
+        fill_solid(leds, NUM_LEDS, currentHSVColor);
     }
 
     digitalWrite(POWER_RELAY_PIN, onValue ? HIGH : LOW);
@@ -495,12 +497,18 @@ void cha_rainbow_switch_on_setter(const homekit_value_t value) {
     digitalWrite(POWER_RELAY_PIN, onValue ? HIGH : LOW);
 
     strncpy(currentEffect, onValue ? "rainbow" : "none", MAX_CURRENT_EFFECT_LENGTH);
+    storeEffect();
     setEffectFuncPtr();
+    // Any time an effect gets turned off, we need to refill the current color otherwise the lights will be stuck on whatever was last shown.
+    if (!onValue) {
+        fill_solid(leds, NUM_LEDS, currentHSVColor);
+    }
 }
 
 // Brightness is 0-100
 void cha_rainbow_brightness_setter(const homekit_value_t value) {
     int b = value.int_value;
+    Serial.printf("cha_rainbow_brightness_setter: %d\n", b);
 
     cha_rainbow_brightness.value.int_value = b;
     uint8_t effectBrightness = (uint8_t)ceilf(b * 255.0 / 100.0);
