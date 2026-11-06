@@ -1,16 +1,25 @@
 #include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
 #include <FastLED.h>
 #include "wifi_credentials.h"
 #include "color_remote.h"
 
-#define LED_PIN     5
-#define NUM_LEDS    50
-
 #define DEBUG 1
 
-WiFiServer server(1234);
+#define LED_PIN         5
+#define NUM_LEDS        50
+#define SERVICE_PORT    1234
+
+WiFiServer server(SERVICE_PORT);
 CRGB leds[NUM_LEDS];
 CRGB currentColor = CRGB::Black;
+
+// Stuff for ZeroConf/Bonjour
+bool bHostDomainConfirmed = false;
+char *pcHostDomain = NULL;
+MDNSResponder::hMDNSService hMDNSService = NULL;
+MDNSResponder::hMDNSServiceQuery hMDNSServiceQuery = NULL;
+const char *serviceIdent = "ledicious";
 
 uint8_t brightness = 44;
 
@@ -43,6 +52,14 @@ void setup() {
 
     server.begin();
 
+    MDNS.setHostProbeResultCallback(hostProbeCallback);
+    if (!MDNSResponder::indexDomain(pcHostDomain, 0, "arduino_1") || !MDNS.begin(pcHostDomain)) { 
+        Serial.println("Crud... mDNS did not start");
+    }
+    else {
+        Serial.println("mDNS should be working");
+    }
+
     FastLED.addLeds<WS2812,LED_PIN,GRB>(leds, NUM_LEDS);
     FastLED.setMaxPowerInVoltsAndMilliamps(5, 10000);
     fill_solid(leds, NUM_LEDS, currentColor);
@@ -68,6 +85,8 @@ void logColor(CRGB c) {
 uint8_t currentEffect = FX_noEffect;
 
 void loop() {
+    MDNS.update();
+    
     WiFiClient client = server.available();
     if (client) {
         Serial.println("[client connected]");
@@ -336,4 +355,89 @@ void trails() {
         // Wait a little bit before we loop around and do it again
         delay(10);
     }
+}
+
+//
+// ZeroConf/Bonjour things
+//
+void serviceProbeResult(String p_pcServiceName, const MDNSResponder::hMDNSService p_hMDNSService, bool p_bProbeResult) {
+    (void) p_hMDNSService;
+    Serial.printf("MDNSServiceProbeResultCallback: Service '%s' probe %s\n", p_pcServiceName.c_str(), (p_bProbeResult ? "succeeded." : "failed!"));
+}
+
+
+void hostProbeCallback(String p_pcDomainName, bool p_bProbeResult) {
+
+  Serial.printf("MDNSHostProbeResultCallback: Host domain '%s.local' is %s\n", p_pcDomainName.c_str(), (p_bProbeResult ? "free" : "already USED!"));
+
+  if (true == p_bProbeResult) {
+    // Set station hostname
+//    setStationHostname(pcHostDomain);
+
+    if (!bHostDomainConfirmed) {
+      // Hostname free -> setup clock service
+      bHostDomainConfirmed = true;
+
+      if (!hMDNSService) {
+        // Add a 'http.tcp' service to port 'SERVICE_PORT', using the host domain as instance domain
+        hMDNSService = MDNS.addService(0, serviceIdent, "tcp", SERVICE_PORT);
+        if (hMDNSService) {
+              MDNS.setServiceProbeResultCallback(hMDNSService, serviceProbeResult);
+        
+              // Add some '_http._tcp' protocol specific MDNS service TXT items
+              // See: http://www.dns-sd.org/txtrecords.html#http
+//            MDNS.addServiceTxt(hMDNSService, "user", "");
+//            MDNS.addServiceTxt(hMDNSService, "password", "");
+//            MDNS.addServiceTxt(hMDNSService, "path", "/");
+        }
+        
+        // Install dynamic 'http.tcp' service query
+        if (!hMDNSServiceQuery) {
+            hMDNSServiceQuery = MDNS.installServiceQuery(serviceIdent, "tcp", MDNSServiceQueryCallback);
+            if (hMDNSServiceQuery) {
+                Serial.printf("MDNSProbeResultCallback: Service query for '%s.tcp' services installed.\n", serviceIdent);
+            } else {
+                Serial.printf("MDNSProbeResultCallback: FAILED to install service query for 'http.tcp' services!\n");
+            }
+        }
+      }
+    }
+  }
+  else 
+  {
+    // Change hostname, use '-' as divider between base name and index
+    if (MDNSResponder::indexDomain(pcHostDomain, "-", 0)) {
+        MDNS.setHostname(pcHostDomain);
+    } else {
+        Serial.println("MDNSProbeResultCallback: FAILED to update hostname!");
+    }
+  }
+}
+
+
+void MDNSServiceQueryCallback(MDNSResponder::MDNSServiceInfo serviceInfo, MDNSResponder::AnswerType answerType, bool p_bSetContent) {
+  String answerInfo;
+  switch (answerType) {
+    case MDNSResponder::AnswerType::ServiceDomain :
+      answerInfo = "ServiceDomain " + String(serviceInfo.serviceDomain());
+      break;
+    case MDNSResponder::AnswerType::HostDomainAndPort :
+      answerInfo = "HostDomainAndPort " + String(serviceInfo.hostDomain()) + ":" + String(serviceInfo.hostPort());
+      break;
+    case MDNSResponder::AnswerType::IP4Address :
+      answerInfo = "IP4Address ";
+      for (IPAddress ip : serviceInfo.IP4Adresses()) {
+        answerInfo += "- " + ip.toString();
+      };
+      break;
+    case MDNSResponder::AnswerType::Txt :
+      answerInfo = "TXT " + String(serviceInfo.strKeyValue());
+      for (auto kv : serviceInfo.keyValues()) {
+        answerInfo += "\nkv : " + String(kv.first) + " : " + String(kv.second);
+      }
+      break;
+    default :
+      answerInfo = "Unknown Answertype";
+  }
+  Serial.printf("Answer %s %s\n", answerInfo.c_str(), p_bSetContent ? "Modified" : "Deleted");
 }
