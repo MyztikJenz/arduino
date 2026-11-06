@@ -34,12 +34,12 @@ use the FTDI programmer for this, not an Arduino. Too much a pain in the ass to 
 
 3) Run "updater.sh"
 
-4) Once done, wire GPIO to high or let it float. Start up Arduino IDE and monitor, power-cycle ESP8266.
+4) Once done, power off, wire GPIO to high, Start up Arduino IDE and monitor, power on.
 
 if all went well, AT+GMR should show the "good" firmware noted below.
 
 
-### To get a printout of the chip's details, pull RST low then back to high. It'll print out a bunch of stuff like (assuming you have a monitor on the port):
+### To get a printout of the chip's details, pull RST low then back to high. It'll print out a bunch of stuff like (assuming you have a monitor on the port). The same can be done with AT+RST:
 
  ets Jan  8 2013,rst cause:4, boot mode:(3,1)
 
