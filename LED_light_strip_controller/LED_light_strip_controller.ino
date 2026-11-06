@@ -1,17 +1,15 @@
 #include <ESP8266WiFi.h>
 #include <FastLED.h>
-//#include <IRremote.h>
 #include "wifi_credentials.h"
 #include "color_remote.h"
 
-#define IR_SENSOR   9
 #define LED_PIN     5
 #define NUM_LEDS    50
 
+#define DEBUG 1
+
 WiFiServer server(1234);
 CRGB leds[NUM_LEDS];
-//IRrecv irrecv(IR_SENSOR);
-//decode_results irResults;
 CRGB currentColor = CRGB::Black;
 
 uint8_t brightness = 44;
@@ -27,14 +25,8 @@ void setup() {
     Serial.begin(9600);
     delay(100);
     Serial.println(F("Well, hello there..."));
-//    irrecv.enableIRIn();
-//    Serial.println();
-//    Serial.println();
-//    Serial.print("Connecting to ");
-//    Serial.println(wifi_ssid);
-//    
+
     WiFi.begin(wifi_ssid, wifi_password);
-    
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
         Serial.print(".");
@@ -82,19 +74,20 @@ void loop() {
         while (client.connected()) {
             if (client.available()) {
                 String cLine = client.readStringUntil('\r');
-//                Serial.print(cLine);
                 cLine.trim();
                 CmdResults *r = commandProcessor(cLine);
 
+#if DEBUG
                 Serial.print(r->code);
                 Serial.println(r->msg);
+#endif
                 
                 if (r->code == 1) { // end of commands from the client 
-                    client.println("I heard ya!");
+                    client.println(">thanks for coming!");
                     break;
                 }
                 else {
-                    client.println(r->msg);
+                    client.print(">");client.println(r->msg);
                 }
                 free(r);
             }
@@ -203,16 +196,46 @@ void loop() {
 
 }
 
+#define SET_OK  sprintf(r->msg, "ok")
 CmdResults *commandProcessor(String cmd) {
-    Serial.print("[");Serial.print(cmd);Serial.println("]");
     CmdResults *r = (CmdResults *)malloc(sizeof(CmdResults));
     bzero(r, sizeof(CmdResults));
     if (cmd == "ping") {
         sprintf(r->msg, "pong");
         r->code = 0;
     }
-    else if (cmd == "") {
-        r->code = 1;
+    else if (cmd == "") { // End the connection
+//        r->code = 1;
+    }
+    else if (cmd.startsWith("setColor:")) {
+        r->code = 0;
+        SET_OK;
+        String hexColor = cmd.substring(9);
+        int n = (int)strtol(hexColor.c_str(), NULL, 16);
+        currentColor = CRGB(n);
+        logColor(currentColor);
+        fill_solid(leds, NUM_LEDS, currentColor);
+        FastLED.show();
+    }
+    else if (cmd.startsWith("effect:")) {
+        r->code = 0;
+        SET_OK;
+        String effectName = cmd.substring(7);
+        Serial.println(effectName);
+    }
+    else if (cmd.startsWith("brightness:")) {
+        if (cmd.charAt(11) == '+') {
+            uint8_t limit = 255 - brightness;
+            brightness += (limit >= brightnessAdjustment) ? brightnessAdjustment : limit;
+        }
+        else {
+            brightness -= (brightness >= brightnessAdjustment) ? brightnessAdjustment : brightness;
+        }
+        FastLED.setBrightness(brightness);
+        FastLED.show();
+
+        r->code = 0;
+        SET_OK;
     }
     else {
         sprintf(r->msg, "Unknown command: [%s]", cmd.c_str());
