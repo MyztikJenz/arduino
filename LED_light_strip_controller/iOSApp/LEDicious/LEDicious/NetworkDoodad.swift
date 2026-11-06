@@ -8,7 +8,7 @@
 import Foundation
 import Combine
 import Network
-//import SwiftUI
+import SwiftUI
 
 class NetworkDoodad {
     private var client:BonjourClient
@@ -36,10 +36,10 @@ class NetworkDoodad {
         
     func startConnection() {
         seenFirstMsg = (false, false, false)
-        colorSubscriber = client.server.$hexValue.receive(on: queue).sink(receiveValue: { (hexString:String) in
+        colorSubscriber = client.server.$hexValue.receive(on: queue).removeDuplicates().sink(receiveValue: { (hexString:String) in
             print("NetworkDoodad received hex: \(hexString)")
             if self.seenFirstMsg.color {
-                self.sendString("setColor:\(hexString)")
+                self.sendString("setColor:\(hexString)\r")
             }
             else {
                 self.seenFirstMsg.color = true
@@ -49,17 +49,19 @@ class NetworkDoodad {
         effectSubscriber = client.server.$currentEffect.receive(on: queue).sink(receiveValue: { (effect:Effect) in
             print("NetworkDoodad received effect: \(effect.rawValue)")
             if self.seenFirstMsg.effect {
-                self.sendString("effect:\(effect.rawValue)")
+                self.sendString("effect:\(effect.rawValue)\r")
             }
             else {
                 self.seenFirstMsg.effect = true
             }
         })
         
-        brightnessSubscriber = client.server.$brightness.receive(on: queue).sink(receiveValue: { (brightness:Float) in
+        brightnessSubscriber = client.server.$brightness.receive(on: queue).removeDuplicates().sink(receiveValue: { (brightness:Double) in
+
             print("NetworkDoodad received brightness: \(brightness)")
             if self.seenFirstMsg.brightness {
-                self.sendString("brightness:\(brightness)")
+                let uNormValue = Int(brightness * 255)
+                self.sendString("brightness:\(uNormValue)\r")
             }
             else {
                 self.seenFirstMsg.brightness = true
@@ -82,10 +84,26 @@ class NetworkDoodad {
                 if let _msg = String(data: data, encoding: .utf8) {
                     var msg = _msg
                     print("Received message: \(msg)")
-                    if msg.hasPrefix("currentConfig:") {
-                        msg.removeSubrange(msg.startIndex..<msg.index(msg.startIndex, offsetBy: 13))
-                        var parts = msg.split(separator: "|")
+                    if msg.hasPrefix(">currentConfig:") {
+                        msg.removeSubrange(msg.startIndex..<msg.index(msg.startIndex, offsetBy: 15))
+                        let parts = msg.split(separator: "|")
                         
+                        DispatchQueue.main.async {
+                            if let color = Color(from: String(parts[0])), self.client.server.color != color {
+                                self.client.server.color = color
+                            }
+                            
+                            if let effect = Effect(rawValue: String(parts[1])), self.client.server.currentEffect != effect {
+                                self.client.server.currentEffect = effect
+                            }
+                            
+                            if let brightness = Double(parts[2]) {
+                                let normValue = brightness / 255.0
+                                if self.client.server.brightness != normValue {
+                                    self.client.server.brightness = normValue
+                                }
+                            }
+                        }
                     }
                 }
                 else {
@@ -105,7 +123,7 @@ class NetworkDoodad {
     }
 
     func sendData(_ data: Data) {
-        conn?.send(content: data, completion: .contentProcessed({ (error) in
+        conn?.send(content: data, contentContext: .defaultMessage, isComplete: true, completion: .contentProcessed({ (error) in
             if let error = error {
                 self.connDidFail(error: error)
             }

@@ -30,5 +30,5 @@ class LEDServer : ObservableObject {
     }
     @Published var hexValue: String = "0xFF0000"
     @Published var currentEffect: Effect = .none
-    @Published var brightness: Float = 0.5 // 0.0 <-> 1.0
+    @Published var brightness: Double = 0.5 // 0.0 <-> 1.0
 }

@@ -94,10 +94,13 @@ void loop() {
             if (client.available()) {
                 String cLine = client.readStringUntil('\r');
                 cLine.trim();
+#if DEBUG
+                Serial.printf("received command: %s\n", cLine.c_str());
+#endif
                 CmdResults *r = commandProcessor(cLine);
 
 #if DEBUG
-                Serial.printf("code: %d msg: %s", r->code, r->msg);
+                Serial.printf("code: %d msg: %s\n", r->code, r->msg);
 #endif
                 
                 if (r->code == 1) { // end of commands from the client 
@@ -105,7 +108,7 @@ void loop() {
                     break;
                 }
                 else {
-                    client.printf(">%s", r->msg);
+                    client.printf(">%s\n", r->msg);
 //                    client.print(">");client.println(r->msg);
                 }
                 free(r);
@@ -224,7 +227,7 @@ CmdResults *commandProcessor(String cmd) {
         r->code = 0;
     }
     else if (cmd == "currentConfig") {
-        sprintf(r->msg, "currentConfig:0x%02X%02X%02X|none|%hhu", c.red, c.green, c.blue, brightness);
+        sprintf(r->msg, "currentConfig:0x%02X%02X%02X|none|%hhu", currentColor.red, currentColor.green, currentColor.blue, brightness);
         r->code = 0;
     }
     else if (cmd == "") { // End the connection

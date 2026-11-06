@@ -44,7 +44,9 @@ class BonjourManager: ObservableObject {
                 switch browserResult.endpoint {
                 case .service(name: let name, type: _, domain: _, interface: _):
                     let c = BonjourClient(name: name, endpoint: browserResult.endpoint, server: LEDServer())
-                    clients.append(c)
+                    DispatchQueue.main.async {
+                        self.clients.append(c)
+                    }
                 default:
                     break
                 }
@@ -53,7 +55,9 @@ class BonjourManager: ObservableObject {
                 print("removed \(browserResult.endpoint)")
                 switch browserResult.endpoint {
                 case .service(name: let name, type: _, domain: _, interface: _):
-                    clients.removeAll { $0.name == name }
+                    DispatchQueue.main.async {
+                        self.clients.removeAll { $0.name == name }
+                    }
                 default:
                     break
                 }

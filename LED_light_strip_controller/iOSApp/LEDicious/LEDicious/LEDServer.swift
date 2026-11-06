@@ -10,7 +10,6 @@ import SwiftUI
 struct LEDServerDetail: View {
     var conn: NetworkDoodad? = nil
     @ObservedObject var ledServer:LEDServer
-//    private var effects = ["One", "Amazing", "Another one", "wild", "Boring"]
     
     var body: some View {
         VStack {
@@ -22,18 +21,21 @@ struct LEDServerDetail: View {
                 .frame(width: 1, height: 128) // without a frame, it won't render right. I have no idea why. Height needs to be close to accurate or layout will overlap the picker well.
                 Spacer()
             }
-//            List(effects, id: \.self) { effect in 
-//                Text(effect)
-//            }
             HStack {
                 Text("Brightness")
                 Slider(value: $ledServer.brightness, in: 0.0...1.0, step:0.05)
             }
+            .padding()
             List(Effect.allEffects(), id: \.self) { effect in 
-                Text(effect)
-                    .onTapGesture {
-                        ledServer.currentEffect = Effect(rawValue: effect)!
-                    }
+                HStack {
+                    Text(effect)
+                    Spacer()
+                    Image(systemName:ledServer.currentEffect.rawValue == effect ? "checkmark.circle.fill" : "circle")
+                }
+                .background(Color.white) // Cannot tap the entire cell without this
+                .onTapGesture {
+                    ledServer.currentEffect = Effect(rawValue: effect)!
+                }
             }
             Spacer()
         }
