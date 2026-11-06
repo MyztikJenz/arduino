@@ -20,9 +20,14 @@
 #define POWER_RELAY_PIN 14
 #define PAIR_MODE_PIN   16
 #define NUM_LEDS        10
-#define SERVICE_PORT    1234
 
+#define RUN_WEB_SERVER  0
+#if RUN_WEB_SERVER
+#define SERVICE_PORT    1234
 WiFiServer server(SERVICE_PORT);
+#endif
+
+
 CRGB leds[NUM_LEDS];
 CRGB currentColor = CRGB::White;
 CHSV currentHSVColor = CHSV(HUE_BLUE, 255, 255);
@@ -34,11 +39,13 @@ void (*currentEffectFunc)(void) = NULL;
 #define RESET_STORED_VALUES 0   // Set to 1 to reset EEPROM values to the standard (defined above)
 
 // Stuff for ZeroConf/Bonjour
+#if RUN_WEB_SERVER
 bool bHostDomainConfirmed = false;
 char *pcHostDomain = NULL;
 MDNSResponder::hMDNSService hMDNSService = NULL;
 MDNSResponder::hMDNSServiceQuery hMDNSServiceQuery = NULL;
 const char *serviceIdent = "ledicious";
+#endif
 
 // EEPROM addresses
 int addr_offset          = 100;               // Someone (probably the HomeKit stuff) is scribbling in the lower memory addresses
@@ -59,12 +66,13 @@ static bool inPairingMode = false;  // Hold the pairing button during restart to
 #define REPORT_HOMEKIT_USAGE    0   // Set to 1 to see periodic HomeKit stats
 
 // The message that's returned from Command processing when connected via the App
+#if RUN_WEB_SERVER
 #define MAX_MSG_SIZE 256
 typedef struct t_results {
      char msg[MAX_MSG_SIZE];
      int code;
 } CmdResults;
-
+#endif
 
 void setup() {
     Serial.begin(9600);
@@ -96,6 +104,7 @@ void setup() {
     Serial.print("Gateway: ");
     Serial.println(WiFi.gatewayIP());
 
+#if RUN_WEB_SERVER
     server.begin();
 
     MDNS.setHostProbeResultCallback(hostProbeCallback);
@@ -105,6 +114,7 @@ void setup() {
     else {
         Serial.println("mDNS should be working");
     }
+#endif
 
 #if RESET_STORED_VALUES > 0
     storeCurrentColor();
@@ -226,9 +236,12 @@ void updateEffects() {
 }
 
 void loop() {
+#if RUN_WEB_SERVER
     MDNS.update();
+#endif
     my_homekit_loop();
     
+#if RUN_WEB_SERVER
     WiFiClient client = server.available();
     if (client) {
         Serial.println("[client connected]");
@@ -261,6 +274,7 @@ void loop() {
         client.stop();
         Serial.println("[client disconnected]");
     }
+#endif
 
     // If no client is connected, we're just handling the lights.
     updateEffects();
@@ -280,6 +294,7 @@ void setEffectFuncPtr() {
     else { Serial.printf("Unknown effect [%s] in setEffectFuncPtr\n", currentEffect); }
 }
 
+#if RUN_WEB_SERVER
 #define SET_OK  sprintf(r->msg, "ok")
 CmdResults *commandProcessor(String cmd) {
     CmdResults *r = (CmdResults *)malloc(sizeof(CmdResults));
@@ -343,6 +358,7 @@ CmdResults *commandProcessor(String cmd) {
 
     return r;
 }
+#endif
 
 //
 // HomeKit
@@ -598,6 +614,7 @@ void juggle() {
 // ZeroConf/Bonjour things
 //
 ///////////////////////////////////////////////////////////////////////////
+#if RUN_WEB_SERVER
 void serviceProbeResult(String p_pcServiceName, const MDNSResponder::hMDNSService p_hMDNSService, bool p_bProbeResult) {
     (void) p_hMDNSService;
     Serial.printf("MDNSServiceProbeResultCallback: Service '%s' probe %s\n", p_pcServiceName.c_str(), (p_bProbeResult ? "succeeded." : "failed!"));
@@ -679,3 +696,4 @@ void MDNSServiceQueryCallback(MDNSResponder::MDNSServiceInfo serviceInfo, MDNSRe
   }
   Serial.printf("Answer %s %s\n", answerInfo.c_str(), p_bSetContent ? "Modified" : "Deleted");
 }
+#endif
