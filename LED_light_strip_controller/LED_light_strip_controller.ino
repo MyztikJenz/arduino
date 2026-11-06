@@ -24,10 +24,10 @@
 WiFiServer server(SERVICE_PORT);
 CRGB leds[NUM_LEDS];
 CRGB currentColor = CRGB::White;
-CHSV currentHSVColor = CHSV(HUE_YELLOW, 255, 255);
+CHSV currentHSVColor = CHSV(HUE_BLUE, 255, 255);
 #define MAX_CURRENT_EFFECT_LENGTH   64
 char currentEffect[MAX_CURRENT_EFFECT_LENGTH] = "none";
-uint8_t brightness = 40;
+uint8_t brightness = 128;
 uint8_t effectHue = 0; // rotating base color used by effects
 void (*currentEffectFunc)(void) = NULL;
 #define RESET_STORED_VALUES 0   // Set to 1 to reset EEPROM values to the standard (defined above)
@@ -67,11 +67,6 @@ void setup() {
     delay(100);
     Serial.println(F("Well, hello there..."));
 
-    FastLED.addLeds<WS2812,LED_PIN,GRB>(leds, NUM_LEDS);
-    FastLED.setMaxPowerInVoltsAndMilliamps(5, 1000);
-    fill_solid(leds, NUM_LEDS, currentHSVColor);
-    FastLED.setBrightness(brightness); 
-
     pinMode(POWER_RELAY_PIN, OUTPUT);
     digitalWrite(POWER_RELAY_PIN, LOW);
     cha_switch_on.value.bool_value = false;
@@ -103,7 +98,7 @@ void setup() {
         Serial.println("mDNS should be working");
     }
 
-#if RESET_STORED_VALUES
+#if RESET_STORED_VALUES > 0
     storeCurrentColor();
     storeBrightness();
     storeEffect();
@@ -115,19 +110,12 @@ void setup() {
 #endif
     setEffectFuncPtr();
 
-#if RESET_HOMEKIT
-    homekit_storage_reset();
-#endif
-    cha_hue.setter = cha_hue_setter;
-    cha_switch_on.setter = cha_switch_on_setter;
-    cha_brightness.setter = cha_brightness_setter;
-    cha_saturation.setter = cha_saturation_setter;
-    arduino_homekit_setup(&homekit_config);
-    // Finally figured out why the LEDs were just not working right. `arduino_homekit_setup` sets the clock speed to 160Mhz and
-    // that messes everything up. Resetting back to 80Mhz gets everyone working again (although the HomeKit routines do appear
-    // much slower now).
-    system_update_cpu_freq(SYS_CPU_80MHZ);
+    FastLED.addLeds<WS2812,LED_PIN,GRB>(leds, NUM_LEDS);
+    FastLED.setMaxPowerInVoltsAndMilliamps(5, 1000);
+    fill_solid(leds, NUM_LEDS, currentHSVColor);
+    FastLED.setBrightness(brightness);
 
+    my_homekit_setup();
 }
 
 unsigned long lastValue = 0;
@@ -144,39 +132,35 @@ void logColor(CRGB c) {
 void loadCurrentColor() { mem_currentColor(false); }
 void storeCurrentColor() { mem_currentColor(true); }
 void mem_currentColor(bool saving) {
-return;
-    uint8_t r = EEPROM.read(addr_savedColor);
-    uint8_t g = EEPROM.read(addr_savedColor+1);
-    uint8_t b = EEPROM.read(addr_savedColor+2);
+    uint8_t hue = EEPROM.read(addr_savedColor);
+    uint8_t saturation = EEPROM.read(addr_savedColor+1);
+//    uint8_t b = EEPROM.read(addr_savedColor+2);
 
     if (saving) {
         bool commit = false;
-        if (r != currentColor.red)   { EEPROM.write(addr_savedColor, currentColor.red); commit = true; }
-        if (g != currentColor.green) { EEPROM.write(addr_savedColor+1, currentColor.green); commit = true; }
-        if (b != currentColor.blue)  { EEPROM.write(addr_savedColor+2, currentColor.blue); commit = true; }
+        if (hue != currentHSVColor.hue)               { EEPROM.write(addr_savedColor, currentHSVColor.hue); commit = true; }
+        if (saturation != currentHSVColor.saturation) { EEPROM.write(addr_savedColor+1, currentHSVColor.saturation); commit = true; }
+//        if (b != currentColor.blue)  { EEPROM.write(addr_savedColor+2, currentColor.blue); commit = true; }
 
         if (commit) {
             EEPROM.commit();
         }
 
-//        uint8_t _r = EEPROM.read(addr_savedColor);
-//        uint8_t _g = EEPROM.read(addr_savedColor+1);
-//        uint8_t _b = EEPROM.read(addr_savedColor+2);
-//        Serial.printf("memcheck: Loaded 0x%02X%02X%02X from memory\n", _r, _g, _b);
+        uint8_t _h = EEPROM.read(addr_savedColor);
+        uint8_t _s = EEPROM.read(addr_savedColor+1);
+        Serial.printf("memcheck color: commit:(%s) hue(%hhu) saturation(%hhu)\n", commit ? "true" : "false", _h, _s);
     }
     else {
 #if DEBUG
-        Serial.printf("Loaded color 0x%02X%02X%02X from memory\n", r, g, b);
+        Serial.printf("Loaded color hue(%hhu) saturation(%hhu) from memory\n", hue, saturation);
 #endif
-        currentColor = CRGB(r, g, b);
-//        currentHSVColor = CHSV();
+        currentHSVColor = CHSV(hue, saturation, brightness);
     }
 }
 
 void loadBrightness() { mem_brightness(false); }
 void storeBrightness() { mem_brightness(true); }
 void mem_brightness(bool saving) {
-return;
     uint8_t b = EEPROM.read(addr_savedBrightness);
     if (saving) {
         if (b != brightness) { 
@@ -198,7 +182,6 @@ return;
 void loadEffect() { mem_effect(false); }
 void storeEffect() { mem_effect(true); }
 void mem_effect(bool saving) {
-return;
     char e[MAX_CURRENT_EFFECT_LENGTH];
     bzero(e, MAX_CURRENT_EFFECT_LENGTH);
     EEPROM.get(addr_savedEffect, e);
@@ -234,29 +217,7 @@ void updateEffects() {
     }
 }
 
-static bool hasInitdFastLEDOnce = false;
-
-bool isHigh = true;
 void loop() {
-//    while(true) {
-//        digitalWrite(POWER_RELAY_PIN, isHigh ? HIGH: LOW);
-//        Serial.printf("pin is %s\n", isHigh ? "high" : "low");
-//        isHigh = !isHigh;
-//        delay(5000);
-//    }
-
-//    if (cha_switch_on.value.bool_value == true && !hasInitdFastLEDOnce) {
-    if (!hasInitdFastLEDOnce) {
-//        Serial.println("SEtting up FastLED");
-//        FastLED.addLeds<WS2812,LED_PIN,GRB>(leds, NUM_LEDS);
-//        FastLED.setMaxPowerInVoltsAndMilliamps(5, 500);
-//        fill_solid(leds, NUM_LEDS, CRGB::White);
-//        FastLED.setBrightness(128); 
-//        FastLED.show();
-//        delay(50);
-        hasInitdFastLEDOnce = true;
-    }
-    
     MDNS.update();
     my_homekit_loop();
     
@@ -395,48 +356,105 @@ void my_homekit_loop() {
 #endif
 }
 
+void my_homekit_setup() {
+#if RESET_HOMEKIT
+    homekit_storage_reset();
+#endif
+    cha_hue.setter = cha_hue_setter;
+    cha_switch_on.setter = cha_switch_on_setter;
+    cha_brightness.setter = cha_brightness_setter;
+    cha_saturation.setter = cha_saturation_setter;
+
+    // Set the HomeKit Characteristics to their defaults as restored from memory. HomeKit uses this to update it's UI.
+    cha_brightness.value.int_value = (brightness * 100 / 255);
+    cha_saturation.value.float_value = (float)(currentHSVColor.saturation * 100.0 / 255.0);
+    cha_hue.value.int_value = (uint8_t)(currentHSVColor.hue * 360.0 / 255.0);
+    Serial.printf("cha_hue.value.int_value: %hhu [%hhu]\n", cha_hue.value.int_value, (currentHSVColor.hue * 360 / 255));
+
+    arduino_homekit_setup(&homekit_config);
+
+    // Finally figured out why the LEDs were just not working right. `arduino_homekit_setup` sets the clock speed to 160Mhz and
+    // that messes everything up. Resetting back to 80Mhz gets everyone working again (although the HomeKit routines do appear
+    // much slower now).
+    system_update_cpu_freq(SYS_CPU_80MHZ);
+}
+
 void cha_switch_on_setter(const homekit_value_t value) {
     bool onValue = value.bool_value;
     cha_switch_on.value.bool_value = onValue;
+#if DEBUG
     Serial.printf("Switch: %s\n", onValue ? "ON" : "OFF");
+#endif
     digitalWrite(POWER_RELAY_PIN, onValue ? HIGH : LOW);
-//    delay(1500);
 }
 
 // Brightness is 0-100
 void cha_brightness_setter(const homekit_value_t value) {
     int b = value.int_value;
+#if DEBUG
     Serial.printf("brightness: %d\n", b);
+#endif
+
     cha_brightness.value.int_value = b;
     brightness = (uint8_t)ceilf(b * 255.0 / 100.0);
     storeBrightness();
+    currentHSVColor.value = brightness;
     FastLED.setBrightness(brightness);
-    FastLED.show();
+}
+
+// Hue and saturation always come in pairs (hue is currently first). Probably could get away with just calling fill_solid() in both callbacks,
+// but we can probably do better than that just in case the order flips down the road someday.
+// Hmmm... this assumption of the hue/saturation pairs may not be accurate. I've seen saturation change without hue.
+typedef struct {
+    unsigned int hue_called : 1;
+    unsigned int saturation_called : 1;
+} CallbackRegister;
+CallbackRegister cbr;
+
+void _colorSetter() {
+    if (cbr.hue_called && cbr.saturation_called) {
+        cbr.hue_called = false;
+        cbr.saturation_called = false;
+
+        Serial.println("updating color...");
+        storeCurrentColor();
+        fill_solid(leds, NUM_LEDS, currentHSVColor);
+    }
 }
 
 // Saturation is 0-100
+// And for some reason, this comes in as a float
 void cha_saturation_setter(const homekit_value_t value) {
-    Serial.printf("saturation: %f\n", value.float_value);
-    
+    float s = value.float_value;
+#if DEBUG
+    Serial.printf("saturation: %f\n", s);
+#endif
+
+    cbr.saturation_called = true;
+    cha_saturation.value.float_value = s;
+    uint8_t newSaturation = (uint8_t)ceilf(s * 255.0 / 100.0);
+    currentHSVColor.saturation = newSaturation;
+    _colorSetter();
 }
 
 // Hue is 0-360
 void cha_hue_setter(const homekit_value_t value) {
     int h = (int)value.float_value;
+#if DEBUG
     Serial.printf("hue: %d\n", h);
+#endif
 
+    cbr.hue_called = true;
+    cha_hue.value.int_value = h;
     uint8_t newHue = (uint8_t)(h * 255 / 360);
-//    currentColor.setHue(newHue);
-    currentHSVColor = CHSV(newHue, 255, 255);
-    storeCurrentColor();
-    fill_solid(leds, NUM_LEDS, currentHSVColor);
-//    FastLED.show();
-
+    currentHSVColor.hue = newHue;
+    _colorSetter();
 }
 
 //
 // Effects
 //
+// Reminder - All effects must handle calling FastLED.show() themselves.
 ///////////////////////////////////////////////////////////////////////////
 void fadeall() { 
     for(int i = 0; i < NUM_LEDS; i++) { leds[i].nscale8(250); } 
