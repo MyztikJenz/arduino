@@ -122,10 +122,10 @@ void setup() {
     cha_switch_on.value.bool_value = false;
 
     pinMode(PAIR_MODE_PIN, INPUT_PULLUP);
-    
     inPairingMode = (digitalRead(PAIR_MODE_PIN) == HIGH);
-    
-    EEPROM.begin(1024);
+
+    // 4 = saved color and effect
+    EEPROM.begin(addr_offset + 4 + totalNumberOfEffects);
 
     WiFi.begin(wifi_ssid, wifi_password);
     while (WiFi.status() != WL_CONNECTED) {
@@ -185,6 +185,10 @@ void logColor(CRGB c) {
     Serial.println(str);
 }
 
+void logHSVColor(CHSV c) {
+    Serial.printf_P(PSTR("Current color: hue(%hhu) sat(%hhu) bri(%hhu)\n"), c.hue, c.saturation, c.value);
+}
+
 void loadCurrentColor() { mem_currentColor(false); }
 void storeCurrentColor() { mem_currentColor(true); }
 void mem_currentColor(bool saving) {
@@ -200,9 +204,11 @@ void mem_currentColor(bool saving) {
             EEPROM.commit();
         }
 
-//        uint8_t _h = EEPROM.read(addr_savedColor);
-//        uint8_t _s = EEPROM.read(addr_savedColor+1);
-//        Serial.printf_P(PSTR("memcheck color: commit:(%s) hue(%hhu) saturation(%hhu)\n"), commit ? "true" : "false", _h, _s);
+        logHSVColor(currentHSVColor);
+
+        uint8_t _h = EEPROM.read(addr_savedColor);
+        uint8_t _s = EEPROM.read(addr_savedColor+1);
+        Serial.printf_P(PSTR("memcheck color: commit:(%s) hue(%hhu) saturation(%hhu)\n"), commit ? "true" : "false", _h, _s);
     }
     else {
 #if _DEBUG_
@@ -433,15 +439,15 @@ void my_homekit_setup() {
         homekit_storage_reset();
     }
 
+    cha_switch_on.setter_ex = common_effect_switch_on_setter;
     cha_hue.setter = cha_hue_setter;
-    cha_switch_on.setter = cha_switch_on_setter;
-    cha_brightness.setter = cha_brightness_setter;
     cha_saturation.setter = cha_saturation_setter;
+    cha_brightness.setter = cha_brightness_setter;
 
     // Set the HomeKit Characteristics to their defaults as restored from memory. HomeKit uses this to update it's UI.
-    cha_brightness.value.int_value = (fetchBrightness(none) * 100 / 255);
-    cha_saturation.value.float_value = (float)(currentHSVColor.saturation * 100.0 / 255.0);
     cha_hue.value.int_value = (uint8_t)(currentHSVColor.hue * 360.0 / 255.0);
+    cha_saturation.value.float_value = (float)(currentHSVColor.saturation * 100.0 / 255.0);
+    cha_brightness.value.int_value = (fetchBrightness(none) * 100 / 255);
 
     // Now set up each effect's switch
     cha_trails_switch_on.setter_ex = common_effect_switch_on_setter;
@@ -476,10 +482,11 @@ void cha_switch_on_setter(const homekit_value_t value) {
     if (currentEffect != none) {
         currentEffect = none;
         storeEffect();
-        fill_solid(leds, NUM_LEDS, currentHSVColor);
+        setEffectFuncPtr();
     }
-
+ 
     digitalWrite(POWER_RELAY_PIN, onValue ? HIGH : LOW);
+    fill_solid(leds, NUM_LEDS, currentHSVColor);
 }
 
 // Brightness is 0-100
@@ -574,40 +581,38 @@ Effect _effectForCharacteristic(homekit_characteristic_t *tgt) {
     }
 }
 
-void _effect_switch_on_setter(Effect effect, homekit_characteristic_t *tgtCharacteristic, const homekit_value_t value) {
-    
-}
-
 void common_effect_switch_on_setter(homekit_characteristic_t *ch, const homekit_value_t value) {
     static homekit_characteristic_t *lastCharacteristic = NULL;
     Effect e = _effectForCharacteristic(ch);
     if (e < totalNumberOfEffects) {
-//        _effect_switch_on_setter(e, ch, value);
         bool onValue = value.bool_value;
         if (lastCharacteristic == ch && onValue == ch->value.bool_value) {
-            // No-op. The same characteristic is asking for the same value. Weird... could be the other switch is trying to update.
-            Serial.printf("Same last char, same value... ignoring request from %x\n", ch);
+            // No-op. The same characteristic is asking for the same value. Happens because HomeKit expects this to be idempotent.
             return;
         }
         
         ch->value.bool_value = onValue;
 
         if (onValue) {
-            Serial.printf("Last char: %x (bool_value: %d)\n", lastCharacteristic, (lastCharacteristic) ? lastCharacteristic->value.bool_value : 7);
-            // Turn off any previous effect, then just switcht to the next effect
+            // Turn off any previous effect, then just switch to the next effect
+            // Unfortunately, this is not reflected in the HomeKit UI until the HomeKit app decides to "Get Characteristics" for all services,
+            // which only seems to happen on app launch and after the device unlocks.
             if (lastCharacteristic) {
                 lastCharacteristic->value.bool_value = false;
-                Serial.printf("Last char turned off: %d\n", lastCharacteristic->value.bool_value);
             }
             lastCharacteristic = ch;
             currentEffect = e;
-            Serial.printf("Last char now: %x (currentEffect: %d)\n", lastCharacteristic, (int)currentEffect);
+
+            if (currentEffect == none) {
+                fill_solid(leds, NUM_LEDS, currentHSVColor);
+            }
         }
         else {
             lastCharacteristic = NULL;
             currentEffect = none;
             // When turning off, fill the LEDs with 0 saturated red (black) so that they won't flash when we turn them on again
             fill_solid(leds, NUM_LEDS, CHSV(HUE_RED, 0, 0));
+            FastLED.show();
         }
         storeEffect();
         setEffectFuncPtr();
