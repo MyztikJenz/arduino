@@ -13,9 +13,12 @@ import Network
 class NetworkDoodad {
     private var client:BonjourClient
     private var queue = DispatchQueue(label: "NetworkDoodadQueue")
-    private var subscriber: AnyCancellable? = nil
+    private var colorSubscriber: AnyCancellable? = nil
+    private var effectSubscriber: AnyCancellable? = nil
+    private var brightnessSubscriber: AnyCancellable? = nil
 //    private var serviceEndpoint = NWEndpoint.hostPort(host: .ipv4(IPv4Address.init("192.168.174.199")!), port: NWEndpoint.Port.init(rawValue: 11234)!)
     private var conn: NWConnection? = nil
+    private var seenFirstMsg = (color:false, effect:false, brightness:false)
     
     init(client: BonjourClient) {
         self.client = client
@@ -32,22 +35,62 @@ class NetworkDoodad {
     }
         
     func startConnection() {
-        subscriber = client.server.$hexValue.receive(on: queue).sink(receiveValue: { (hexString:String) in
+        seenFirstMsg = (false, false, false)
+        colorSubscriber = client.server.$hexValue.receive(on: queue).sink(receiveValue: { (hexString:String) in
             print("NetworkDoodad received hex: \(hexString)")
-            self.sendString(hexString)
+            if self.seenFirstMsg.color {
+                self.sendString("setColor:\(hexString)")
+            }
+            else {
+                self.seenFirstMsg.color = true
+            }
         })
-//        conn = NWConnection(to: self.client.endpoint, using: .tcp)
-//        conn?.stateUpdateHandler = stateDidChange(to:)
-//        self.setupReceive()
-//        conn?.start(queue: queue)
+
+        effectSubscriber = client.server.$currentEffect.receive(on: queue).sink(receiveValue: { (effect:Effect) in
+            print("NetworkDoodad received effect: \(effect.rawValue)")
+            if self.seenFirstMsg.effect {
+                self.sendString("effect:\(effect.rawValue)")
+            }
+            else {
+                self.seenFirstMsg.effect = true
+            }
+        })
+        
+        brightnessSubscriber = client.server.$brightness.receive(on: queue).sink(receiveValue: { (brightness:Float) in
+            print("NetworkDoodad received brightness: \(brightness)")
+            if self.seenFirstMsg.brightness {
+                self.sendString("brightness:\(brightness)")
+            }
+            else {
+                self.seenFirstMsg.brightness = true
+            }
+        })
+        
+
+        conn = NWConnection(to: client.endpoint, using: .tcp)
+        conn?.stateUpdateHandler = stateDidChange(to:)
+        self.setupReceive()
+        conn?.start(queue: queue)
+        
+        self.sendString("currentConfig")
         
     }
     
     private func setupReceive() {
         conn?.receive(minimumIncompleteLength: 1, maximumLength: 65565, completion: { (data, context, isComplete, error) in
             if let data = data, !data.isEmpty {
-                let msg = String(data: data, encoding: .utf8)
-                print("Received message: \(msg!)")
+                if let _msg = String(data: data, encoding: .utf8) {
+                    var msg = _msg
+                    print("Received message: \(msg)")
+                    if msg.hasPrefix("currentConfig:") {
+                        msg.removeSubrange(msg.startIndex..<msg.index(msg.startIndex, offsetBy: 13))
+                        var parts = msg.split(separator: "|")
+                        
+                    }
+                }
+                else {
+                    print("Unable to create string from data: \(data)")
+                }
             }
             if isComplete {
                 self.stop()
@@ -101,6 +144,11 @@ class NetworkDoodad {
     }
     
     func stop() {
+        colorSubscriber?.cancel()
+        effectSubscriber?.cancel()
+        brightnessSubscriber?.cancel()
+        
+        seenFirstMsg = (false, false, false)
         conn?.stateUpdateHandler = nil
         conn?.cancel()
     }

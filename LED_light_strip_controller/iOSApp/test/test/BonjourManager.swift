@@ -27,8 +27,8 @@ class BonjourManager: ObservableObject {
     @Published var clients = [BonjourClient]()
 
     init() {
-//        let bonjourType = "_ledicious._tcp"
-        let bonjourType = "_http._tcp"
+        let bonjourType = "_ledicious._tcp"
+//        let bonjourType = "_http._tcp"
         browser = NWBrowser(for: .bonjour(type: bonjourType, domain: nil), using: .tcp)
         browser?.browseResultsChangedHandler = { (results, changes) in 
             self.processChanges(changes: changes)

@@ -75,7 +75,7 @@ char str[128];
 bool isOn = true;
 
 void logColor(CRGB c) {
-    sprintf(str, "Current color: %02X%02X%02X", c.red, c.green, c.blue);
+    sprintf(str, "Current color: 0x%02X%02X%02X", c.red, c.green, c.blue);
     Serial.println(str);
 }
 
@@ -97,8 +97,7 @@ void loop() {
                 CmdResults *r = commandProcessor(cLine);
 
 #if DEBUG
-                Serial.print(r->code);
-                Serial.println(r->msg);
+                Serial.printf("code: %d msg: %s", r->code, r->msg);
 #endif
                 
                 if (r->code == 1) { // end of commands from the client 
@@ -106,7 +105,8 @@ void loop() {
                     break;
                 }
                 else {
-                    client.print(">");client.println(r->msg);
+                    client.printf(">%s", r->msg);
+//                    client.print(">");client.println(r->msg);
                 }
                 free(r);
             }
@@ -221,6 +221,10 @@ CmdResults *commandProcessor(String cmd) {
     bzero(r, sizeof(CmdResults));
     if (cmd == "ping") {
         sprintf(r->msg, "pong");
+        r->code = 0;
+    }
+    else if (cmd == "currentConfig") {
+        sprintf(r->msg, "currentConfig:0x%02X%02X%02X|none|%hhu", c.red, c.green, c.blue, brightness);
         r->code = 0;
     }
     else if (cmd == "") { // End the connection

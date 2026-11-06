@@ -10,7 +10,7 @@ import SwiftUI
 struct LEDServerDetail: View {
     var conn: NetworkDoodad? = nil
     @ObservedObject var ledServer:LEDServer
-    private var effects = ["One", "Amazing", "Another one", "wild", "Boring"]
+//    private var effects = ["One", "Amazing", "Another one", "wild", "Boring"]
     
     var body: some View {
         VStack {
@@ -22,8 +22,18 @@ struct LEDServerDetail: View {
                 .frame(width: 1, height: 128) // without a frame, it won't render right. I have no idea why. Height needs to be close to accurate or layout will overlap the picker well.
                 Spacer()
             }
-            List(effects, id: \.self) { effect in 
+//            List(effects, id: \.self) { effect in 
+//                Text(effect)
+//            }
+            HStack {
+                Text("Brightness")
+                Slider(value: $ledServer.brightness, in: 0.0...1.0, step:0.05)
+            }
+            List(Effect.allEffects(), id: \.self) { effect in 
                 Text(effect)
+                    .onTapGesture {
+                        ledServer.currentEffect = Effect(rawValue: effect)!
+                    }
             }
             Spacer()
         }
@@ -34,7 +44,7 @@ struct LEDServerDetail: View {
             conn?.stop()
         }
     }
-    
+
     init(client: BonjourClient) {
         self.ledServer = client.server
         self.conn = NetworkDoodad(client: client)
