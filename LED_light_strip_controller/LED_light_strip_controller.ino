@@ -2,6 +2,7 @@
 #include <ESP8266mDNS.h>
 #include <FastLED.h>
 #include <EEPROM.h>
+#include <arduino_homekit_server.h>
 #include "wifi_credentials.h"
 #include "color_remote.h"
 
@@ -16,7 +17,8 @@
 #define LOG_EFFECT 0 // Set to 1 to see effect names as they're called. It's going to slow things down though...
 
 #define LED_PIN         5
-#define NUM_LEDS        50
+#define POWER_RELAY_PIN 14
+#define NUM_LEDS        1
 #define SERVICE_PORT    1234
 
 WiFiServer server(SERVICE_PORT);
@@ -24,7 +26,7 @@ CRGB leds[NUM_LEDS];
 CRGB currentColor = CRGB::White;
 #define MAX_CURRENT_EFFECT_LENGTH   64
 char currentEffect[MAX_CURRENT_EFFECT_LENGTH] = "none";
-uint8_t brightness = 50;
+uint8_t brightness = 40;
 uint8_t effectHue = 0; // rotating base color used by effects
 void (*currentEffectFunc)(void) = NULL;
 
@@ -40,6 +42,16 @@ int addr_savedColor      = 0;   // 3 bytes
 int addr_savedBrightness = 3;   // 1 byte
 int addr_savedEffect     = 4;   // MAX_CURRENT_EFFECT_LENGTH bytes (64)
 
+// HomeKit characteristics defined in lightstrip_accessory.c
+extern "C" homekit_server_config_t config;
+extern "C" homekit_characteristic_t cha_switch_on;
+extern "C" homekit_characteristic_t cha_brightness;
+extern "C" homekit_characteristic_t cha_saturation;
+extern "C" homekit_characteristic_t cha_hue;
+#define RESET_HOMEKIT           0   // Set to 1 and launch to remove all HomeKit pairing info
+#define REPORT_HOMEKIT_USAGE    0   // Set to 1 to see periodic HomeKit stats
+
+// The message that's returned from Command processing when connected via the App
 #define MAX_MSG_SIZE 256
 typedef struct t_results {
      char msg[MAX_MSG_SIZE];
@@ -48,6 +60,9 @@ typedef struct t_results {
 
 
 void setup() {
+    pinMode(POWER_RELAY_PIN, OUTPUT);
+    digitalWrite(POWER_RELAY_PIN, LOW);
+    
     Serial.begin(9600);
     delay(100);
     Serial.println(F("Well, hello there..."));
@@ -80,7 +95,8 @@ void setup() {
 
     // Load any values from memory
     loadCurrentColor();
-    loadBrightness();
+ //   loadBrightness();
+    storeBrightness();
     loadEffect();
     setEffectFuncPtr();
 
@@ -90,6 +106,14 @@ void setup() {
     FastLED.setBrightness(brightness); 
     FastLED.show();
 
+#if RESET_HOMEKIT
+    homekit_storage_reset();
+#endif
+    cha_hue.setter = cha_hue_setter;
+    cha_switch_on.setter = cha_switch_on_setter;
+    cha_brightness.setter = cha_brightness_setter;
+    cha_saturation.setter = cha_saturation_setter;
+    arduino_homekit_setup(&config);
 }
 
 unsigned long lastValue = 0;
@@ -127,7 +151,7 @@ void mem_currentColor(bool saving) {
     }
     else {
 #if DEBUG
-        Serial.printf("Loaded 0x%02X%02X%02X from memory\n", r, g, b);
+        Serial.printf("Loaded color 0x%02X%02X%02X from memory\n", r, g, b);
 #endif
         currentColor = CRGB(r, g, b);
     }
@@ -187,8 +211,18 @@ void updateEffects() {
     }
 }
 
+bool isHigh = true;
 void loop() {
+//    while(true) {
+//        digitalWrite(POWER_RELAY_PIN, isHigh ? HIGH: LOW);
+//        Serial.printf("pin is %s\n", isHigh ? "high" : "low");
+//        isHigh = !isHigh;
+//        delay(5000);
+//    }
+
+    
     MDNS.update();
+    my_homekit_loop();
     
     WiFiClient client = server.available();
     if (client) {
@@ -303,6 +337,63 @@ CmdResults *commandProcessor(String cmd) {
     }
 
     return r;
+}
+
+//
+// HomeKit
+//
+///////////////////////////////////////////////////////////////////////////
+#if REPORT_HOMEKIT_USAGE
+static uint32_t next_heap_millis = 0;
+#endif
+
+void my_homekit_loop() {
+    arduino_homekit_loop();
+#if REPORT_HOMEKIT_USAGE
+    const uint32_t t = millis();
+    if (t > next_heap_millis) {
+        // show heap info every 5 seconds
+        next_heap_millis = t + 5 * 1000;
+        Serial.printf("Free heap: %d, HomeKit clients: %d\n", ESP.getFreeHeap(), arduino_homekit_connected_clients_count());
+    }
+#endif
+}
+
+void cha_switch_on_setter(const homekit_value_t value) {
+    bool onValue = value.bool_value;
+    cha_switch_on.value.bool_value = onValue;    //sync the value
+    Serial.printf("Switch: %s\n", onValue ? "ON" : "OFF");
+// TODO - jimt - Need a relay to trigger to turn off the lights.
+}
+
+// Brightness is 0-100
+void cha_brightness_setter(const homekit_value_t value) {
+    int b = value.int_value;
+    Serial.printf("brightness: %d\n", b);
+    cha_brightness.value.int_value = b;
+    brightness = (uint8_t)ceilf(b * 255.0 / 100.0);
+    storeBrightness();
+    FastLED.setBrightness(brightness);
+    FastLED.show();
+}
+
+// Saturation is 0-100
+void cha_saturation_setter(const homekit_value_t value) {
+    Serial.printf("saturation: %f\n", value.float_value);
+    
+}
+
+// Hue is 0-360
+void cha_hue_setter(const homekit_value_t value) {
+    int h = (int)value.float_value;
+    Serial.printf("hue: %d\n", h);
+
+    uint8_t newHue = (uint8_t)(h * 255 / 360);
+    currentColor.setHue(newHue);
+    storeCurrentColor();
+    fill_solid(leds, NUM_LEDS, currentColor);
+    FastLED.show();
+
 }
 
 //
