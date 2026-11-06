@@ -79,10 +79,7 @@ void logColor(CRGB c) {
     Serial.println(str);
 }
 
-#define FX_trails       0
-#define FX_totalEffects 1
-#define FX_noEffect     255
-uint8_t currentEffect = FX_noEffect;
+char currentEffect[256] = "none";
 
 void loop() {
     MDNS.update();
@@ -91,6 +88,7 @@ void loop() {
     if (client) {
         Serial.println("[client connected]");
         while (client.connected()) {
+            runEffects();
             if (client.available()) {
                 String cLine = client.readStringUntil('\r');
                 cLine.trim();
@@ -118,104 +116,20 @@ void loop() {
         client.stop();
         Serial.println("[client disconnected]");
     }
+
+    // If no client is connected, we're just handling the lights.
+    runEffects();
     
-#if 0
-    if (irrecv.decode(&irResults)) {
-        uint8_t limit = 0;
-        Serial.println(irResults.value, BIN);
-        testValue = (irResults.value == REPEAT) ? lastValue : irResults.value;
-        // Leave lights off if we're "off" and the button pressed is not the On button
-        if (isOn == false && testValue != ON_BUTTON) {
-            irrecv.resume();
-            return;
-        }
-        switch(testValue) {
-            case R_BUTTON:
-                currentColor.red += 1;
-                logColor(currentColor);
-                fill_solid(leds, NUM_LEDS, currentColor);
-                FastLED.show();                 
-                break;
-            case G_BUTTON:
-                currentColor.green += 1;
-                logColor(currentColor);
-                fill_solid(leds, NUM_LEDS, currentColor);
-                FastLED.show();                 
-                break;
-            case B_BUTTON:
-                currentColor.blue += 1;
-                fill_solid(leds, NUM_LEDS, currentColor);
-                logColor(currentColor);
-                FastLED.show();                 
-                break;
-            case ON_BUTTON:
-                if (isOn != true) {
-                    isOn = true;
-                    fill_solid(leds, NUM_LEDS, currentColor);
-                    FastLED.show();                 
-                }
-                else {
-                    // repeated On button presses do effects!
-                    currentEffect += 1;
-                    if (currentEffect == FX_totalEffects) {
-                        currentEffect = FX_noEffect;
-                    }
-                }
-                break;
-            case OFF_BUTTON:
-                isOn = false;
-                fill_solid(leds, NUM_LEDS, CRGB::Black);
-                FastLED.show();
-                break;
-            case INCREASE_BRIGHTNESS:
-                limit = 255 - brightness;
-                brightness += (limit >= brightnessAdjustment) ? brightnessAdjustment : limit;
-                FastLED.setBrightness(brightness);
-                FastLED.show();
-                break;
-            case DECREASE_BRIGHTNESS:
-                brightness -= (brightness >= brightnessAdjustment) ? brightnessAdjustment : brightness;
-                FastLED.setBrightness(brightness);
-                FastLED.show();
-                break;
-            case FLASH:
-                break;
-            case STROBE:
-                break;
-            case FADE:
-                fadeall();
-                FastLED.show();
-                break;
-            case SMOOTH:
-                // do something
-                break;
-            default:
-                CRGB c = colorForButton(testValue);
-                Serial.print("whut: ");Serial.print(testValue, HEX);Serial.print("  ");Serial.println(c == CRGB(CRGB::Brown));
-                // Brown is an error, don't use it
-                if (c != CRGB(CRGB::Brown)) {
-                    currentColor = c;
-                    fill_solid(leds, NUM_LEDS, c);
-                    FastLED.show();
-                }
-        }
-        if (irResults.value != REPEAT) {
-            lastValue = irResults.value;
-        }
-        irrecv.resume();
-    }
-
-    switch(currentEffect) {
-        case FX_trails: trails(); break;
-        default:
-            break;
-    }
     delay(50);
-#endif
-//    Serial.println("loop");
-//    trails();
-//    delay(50);
+}
 
+void runEffects() {
+    if (strcmp(currentEffect, "none") != 0) {
+        if (strcmp(currentEffect, "trails") != 0) { trails(); }
+        else if (strcmp(currentEffect, "somethingElse") != 0) {
+            
+        }
+    }
 }
 
 #define SET_OK  sprintf(r->msg, "ok")
@@ -245,17 +159,24 @@ CmdResults *commandProcessor(String cmd) {
     }
     else if (cmd.startsWith("effect:")) {
         r->code = 0;
-        SET_OK;
         String effectName = cmd.substring(7);
         Serial.println(effectName);
+        bzero(currentEffect, 256);
+        sprintf(currentEffect, effectName.c_str());
+        SET_OK;        
     }
     else if (cmd.startsWith("brightness:")) {
         if (cmd.charAt(11) == '+') {
             uint8_t limit = 255 - brightness;
             brightness += (limit >= brightnessAdjustment) ? brightnessAdjustment : limit;
         }
-        else {
+        else if (cmd.charAt(11) == '-') {
             brightness -= (brightness >= brightnessAdjustment) ? brightnessAdjustment : brightness;
+        }
+        else {
+            String newBrightness = cmd.substring(11);
+            int n = (int)strtol(newBrightness.c_str(), NULL, 4);
+            brightness = (uint8_t)min(max(n, 0), 255);
         }
         FastLED.setBrightness(brightness);
         FastLED.show();
@@ -269,65 +190,6 @@ CmdResults *commandProcessor(String cmd) {
     }
 
     return r;
-}
-
-CRGB colorForButton(unsigned long buttonValue) {
-    CRGB c;
-    switch(buttonValue) {
-        case R_BUTTON:
-            c = CRGB::Red;
-            break;
-        case G_BUTTON:
-            c = CRGB::Green;
-            break;
-        case B_BUTTON:
-            c = CRGB::Blue;
-            break;
-        case W_BUTTON:
-            c = CRGB::White;
-            break;
-        case LIGHT_ORANGE:
-            c = CRGB(0xFF4B0E);
-            break;
-        case LIGHT_GREEN:
-            c = CRGB(0x64FE2E);
-            break;
-        case BLUE:
-            c = CRGB::Blue;
-            break;
-        case ORANGE:
-            c = CRGB(0xFF4500);
-            break;
-        case LIGHT_BLUE:
-            c = CRGB(0x87CEFA);
-            break;
-        case PURPLE:
-            c = CRGB(0x4B0082);
-            break;
-        case TAN:
-            c = CRGB(0xF43F2D);
-            break;
-        case SEAFOAM:
-            c = CRGB(0x4682B4);
-            break;
-        case MAROON:
-            c = CRGB(0xC71585);
-            break;
-        case YELLOW:
-            c = CRGB(0xFFD700);
-            break;
-        case JADE:
-            c = CRGB(0x20B2AA);
-            break;
-        case PINK:
-            c = CRGB(0xFF0060);
-            break;
-
-        default:
-            c = CRGB::Brown;
-            break;
-    }
-    return c;
 }
 
 void fadeall() { 

@@ -13,10 +13,6 @@ enum Effect : String, CaseIterable {
     case trails
     case somethingElse
     
-//    func toString() -> String {
-//        return "\(self)"
-//    }
-    
     static func allEffects() -> [String] {
         return Effect.allCases.map { $0.rawValue }
     }

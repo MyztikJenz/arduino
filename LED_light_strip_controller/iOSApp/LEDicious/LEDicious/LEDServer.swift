@@ -15,6 +15,17 @@ struct LEDServerDetail: View {
         VStack {
             HStack {
                 Spacer()
+                VStack {
+                    Button("On") {
+                        print("on")
+                    }
+                    .padding()
+                    Button("Off") {
+                        print("off")
+                    }
+                    .padding()
+                }
+                Spacer()
                 ColorPicker(selection: $ledServer.color, supportsOpacity: false) {
                 }
                 .scaleEffect(4.0)
