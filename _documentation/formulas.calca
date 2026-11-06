@@ -33,9 +33,9 @@ nF = 0.001		# nanofarad
 pF = 0.000001	# picofarad
 
 Astable config
-capacitance 	= 1µF 	# in μF (microfarads)
-chargeRes   	= 780Ω  	# in MΩ (megohms)
-dischargeRes	= 47kΩ	# in MΩ
+capacitance 	= 680pF 	# in μF (microfarads)
+chargeRes   	= 10kΩ  	# in MΩ (megohms)
+dischargeRes	= 5MΩ	# in MΩ
 
 outputHigh = 0.693 * (chargeRes + dischargeRes) * capacitance
 outputLow = 0.693 * dischargeRes * capacitance
@@ -45,11 +45,11 @@ period = outputHigh + outputLow
 # Ratio of time the timer is on for the period
 dutyCycle = 100 * outputHigh / period
 
-outputHigh (sec)	=> 0.0331
-outputLow (sec) 	=> 0.0326
-frequency (Hz) 	=> 15.2247
-period (sec) 		=> 0.0657
-dutyCycle (%) 		=> 50.4115
+outputHigh (sec)	=> 0.0024
+outputLow (sec) 	=> 0.0024
+frequency (Hz) 	=> 211.9939
+period (sec) 		=> 0.0047
+dutyCycle (%) 		=> 50.05
 
 
 
